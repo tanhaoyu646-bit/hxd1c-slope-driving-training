@@ -2,6 +2,16 @@ export const PROJECT_ID = 'hxd1c-slope-driving-training-v1';
 
 export const CAB = Object.freeze({ width: 640, height: 480 });
 
+// 原 HXD1C 驾驶台 CVF 贴图并非按 0—5 连续排列自阀位置。
+// 前三帧位于第一行，后三帧位于最后一行。
+export const AUTO_BRAKE_SPRITE_FRAMES = Object.freeze([0, 1, 2, 9, 10, 11]);
+
+export const INDEPENDENT_BRAKE_POSITIONS = Object.freeze([
+  '缓解位', '制动Ⅰ', '制动Ⅱ', '制动Ⅲ', '制动Ⅳ', '全制动位',
+]);
+
+export const DIRECTION_POSITIONS = Object.freeze(['F', 'N', 'R']);
+
 export const BRAKE_POSITIONS = Object.freeze([
   { value: 0, label: '运转位', reduction: 0 },
   { value: 1, label: '初制位', reduction: 50 },

@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SCENARIOS, gradeAt, lineLimitAt } from '../scripts/slopeDrivingConfig.js';
+import {
+  AUTO_BRAKE_SPRITE_FRAMES,
+  INDEPENDENT_BRAKE_POSITIONS,
+  SCENARIOS,
+  gradeAt,
+  lineLimitAt,
+} from '../scripts/slopeDrivingConfig.js';
 import { SlopeDrivingSimulation } from '../scripts/slopeDrivingSimulation.js';
 import { SlopeDrivingAssessment } from '../scripts/slopeDrivingAssessment.js';
 
@@ -70,6 +76,24 @@ test('项目包含独立上坡和下坡配置以及真实坡度区段', () => {
   assert.equal(gradeAt(SCENARIOS.uphill, 3000), 12);
   assert.equal(gradeAt(SCENARIOS.downhill, 3000), -12);
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8100), 55);
+});
+
+test('驾驶台手柄贴图、位置名称和运行联锁与仿真状态对应', () => {
+  assert.deepEqual([...AUTO_BRAKE_SPRITE_FRAMES], [0, 1, 2, 9, 10, 11]);
+  assert.deepEqual([...INDEPENDENT_BRAKE_POSITIONS], ['缓解位', '制动Ⅰ', '制动Ⅱ', '制动Ⅲ', '制动Ⅳ', '全制动位']);
+  const simulation = new SlopeDrivingSimulation('uphill');
+  assert.equal(simulation.command('direction', 'N'), false);
+  assert.equal(simulation.state.direction, 'F');
+  assert.ok(simulation.state.events.some((event) => event.type === 'direction-while-moving'));
+  simulation.state.speed = 0;
+  assert.equal(simulation.command('direction', 'N'), true);
+  assert.equal(simulation.command('direction', 'R'), true);
+  assert.equal(simulation.state.direction, 'R');
+  simulation.command('horn-start');
+  assert.equal(simulation.state.hornActive, true);
+  simulation.command('horn-stop');
+  assert.equal(simulation.state.hornActive, false);
+  assert.equal(simulation.state.hornCount, 1);
 });
 
 test('上坡标准轨迹可完成坡前储能、撒砂、长坡牵引和坡顶调整', () => {

@@ -31,6 +31,9 @@ export class SlopeDrivingSimulation extends EventTarget {
       autoBrake: 0,
       independentBrake: 0,
       sideRelease: false,
+      hornActive: false,
+      hornCount: 0,
+      mainReservoir: 900,
       equalizingReservoir: 600,
       trainPipe: 600,
       tailPipe: 600,
@@ -103,8 +106,13 @@ export class SlopeDrivingSimulation extends EventTarget {
       s.tailQueryCount += 1;
       this.log('tail-query', { tailPipe: s.tailPipe, headPipe: s.trainPipe });
     } else if (type === 'direction') {
-      if (s.speed > 1) this.log('direction-while-moving', { value });
+      if (!['F', 'N', 'R'].includes(value)) return false;
+      if (s.speed > 1) {
+        this.log('direction-while-moving', { requested: value, retained: s.direction });
+        return false;
+      }
       s.direction = value;
+      this.log('direction', { value });
     } else if (type === 'callout') {
       s.calloutCount += 1;
       this.log('callout', { phase: s.phase.id, grade: s.grade });
@@ -119,6 +127,15 @@ export class SlopeDrivingSimulation extends EventTarget {
         s.lkjForcedBrake = 0;
         this.log('lkj-relief', { accepted: true });
       } else this.log('lkj-relief', { accepted: false });
+    } else if (type === 'horn-start') {
+      if (!s.hornActive) {
+        s.hornActive = true;
+        s.hornCount += 1;
+        this.log('horn-start');
+      }
+    } else if (type === 'horn-stop') {
+      if (s.hornActive) this.log('horn-stop');
+      s.hornActive = false;
     } else return false;
 
     if (['traction', 'auto-brake', 'independent-brake', 'side-release'].includes(type)) {
@@ -155,6 +172,9 @@ export class SlopeDrivingSimulation extends EventTarget {
     const tailTarget = s.trainPipe;
     const tailTau = tailTarget < s.tailPipe ? 7.8 : 18.5;
     s.tailPipe += (tailTarget - s.tailPipe) * (1 - Math.exp(-dt / tailTau));
+    const rechargeDemand = Math.max(0, targetPipe - s.trainPipe);
+    s.mainReservoir += (900 - s.mainReservoir) * (1 - Math.exp(-dt / 24));
+    s.mainReservoir = clamp(s.mainReservoir - rechargeDemand * dt * .012, 720, 920);
     s.rechargeReady = s.trainPipe >= 595 && s.tailPipe >= 590;
     if (s.rechargeReady && !this.previousRecharge) this.log('recharge-ready', { tailPipe: s.tailPipe });
     this.previousRecharge = s.rechargeReady;

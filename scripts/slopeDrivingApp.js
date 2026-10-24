@@ -1,4 +1,11 @@
-import { CAB, PROJECT_ID, getScenario } from './slopeDrivingConfig.js';
+import {
+  AUTO_BRAKE_SPRITE_FRAMES,
+  CAB,
+  DIRECTION_POSITIONS,
+  INDEPENDENT_BRAKE_POSITIONS,
+  PROJECT_ID,
+  getScenario,
+} from './slopeDrivingConfig.js';
 import { SlopeDrivingSimulation } from './slopeDrivingSimulation.js';
 import { SlopeDrivingAssessment } from './slopeDrivingAssessment.js';
 import { SlopeDrivingScene } from './slopeDrivingScene.js';
@@ -18,10 +25,17 @@ let selectedView = 'front';
 let lastFrame = performance.now();
 let resultShown = false;
 let activeDrag = null;
+let suppressControlClickUntil = 0;
 let audioContext = null;
 let lastAlertLevel = 'normal';
+let cabNotice = '';
+let cabNoticeUntil = 0;
+let hornPointerId = null;
 const overlay = $('#cab-overlay');
 const elements = {};
+const hornAudio = new Audio('./assets/audio/HXD1C-horn.wav');
+hornAudio.preload = 'auto';
+hornAudio.loop = true;
 
 function makeSprite(id, image, x, y, width, height, columns, rows, label) {
   const element = document.createElement('div');
@@ -33,13 +47,71 @@ function makeSprite(id, image, x, y, width, height, columns, rows, label) {
 }
 
 function makeBadge(label, x, y, width = 82) {
-  const element = document.createElement('button');
-  element.type = 'button';
+  const element = document.createElement('div');
   element.className = 'control-position-badge';
+  element.setAttribute('aria-live', 'polite');
   element.innerHTML = `<b>${label}</b><span>—</span>`;
   Object.assign(element.style, { left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width) });
   overlay.append(element);
   return element;
+}
+
+function makeTouchTarget(id, x, y, width, height, label) {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.className = 'touch-target';
+  element.dataset.dragTarget = id;
+  element.setAttribute('aria-label', label);
+  Object.assign(element.style, { left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width), height: pct(height, CAB.height) });
+  overlay.append(element);
+  return element;
+}
+
+function makeNeedle(id, image, x, y, width, height, pivot, start, end, className = '') {
+  const element = document.createElement('img');
+  element.className = `needle ${className}`;
+  element.dataset.id = id;
+  element.dataset.start = start;
+  element.dataset.end = end;
+  element.src = `./assets/archive-cabview/${image}`;
+  element.alt = '';
+  element.setAttribute('aria-hidden', 'true');
+  Object.assign(element.style, {
+    left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width), height: pct(height, CAB.height),
+    transformOrigin: `50% ${pivot / height * 100}%`,
+  });
+  overlay.append(element);
+  return element;
+}
+
+function makeBar(id, x, y, width, height, color = '#5dffd5') {
+  const element = document.createElement('div');
+  element.className = 'gauge-bar';
+  element.dataset.id = id;
+  Object.assign(element.style, { left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width), height: pct(height, CAB.height), background: color });
+  overlay.append(element);
+  return element;
+}
+
+function makeDigital(id, x, y, width, height, className = '') {
+  const element = document.createElement('div');
+  element.className = `digital ${className}`;
+  element.dataset.id = id;
+  Object.assign(element.style, { left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width), height: pct(height, CAB.height) });
+  overlay.append(element);
+  return element;
+}
+
+function setNeedle(element, value, maximum) {
+  const ratio = clamp((Number(value) || 0) / maximum, 0, 1);
+  const start = Number(element.dataset.start);
+  const end = Number(element.dataset.end);
+  element.style.transform = `rotate(${start + (end - start) * ratio}deg)`;
+}
+
+function showCabNotice(message, duration = 3200) {
+  cabNotice = message;
+  cabNoticeUntil = performance.now() + duration;
 }
 
 function makePhysical(label, x, y, width, height, handler, className = '') {
@@ -69,14 +141,47 @@ function createCabControls() {
   elements.independent = makeSprite('independent-brake', 'HXD1C_XZ.png', 138, 341, 35, 60, 4, 3, '单独制动阀');
   elements.traction = makeSprite('traction', 'HXD1C_GL.png', 464, 345, 46, 81, 2, 8, '牵引和电制动手柄');
   elements.direction = makeSprite('direction', 'HXD1C_HX.png', 530, 366, 60, 40, 3, 1, '换向手柄');
-  elements.autoBadge = makeBadge('自阀', 20, 321, 80);
-  elements.independentBadge = makeBadge('单阀', 116, 321, 78);
-  elements.tractionBadge = makeBadge('牵引/电制', 433, 323, 96);
-  elements.directionBadge = makeBadge('换向手柄', 521, 342, 88);
-  elements.sideRelease = makeBadge('单缓', 113, 404, 68);
-  elements.sideRelease.classList.add('side-release-control');
-  elements.sideRelease.addEventListener('click', () => simulation.command('side-release', !simulation.state.sideRelease));
+  elements.autoBadge = makeBadge('自阀', 20, 311, 80);
+  elements.independentBadge = makeBadge('单阀', 116, 311, 78);
+  elements.tractionBadge = makeBadge('牵引/电制', 433, 315, 96);
+  elements.directionBadge = makeBadge('换向手柄', 521, 331, 88);
+  elements.sideRelease = makePhysical('单阀侧压：单独缓解机车制动缸', 116, 405, 82, 27, () => {
+    const next = !simulation.state.sideRelease;
+    simulation.command('side-release', next);
+    showCabNotice(next ? '单阀侧压：机车制动缸单独缓解' : '单阀侧压已释放');
+  }, 'side-release-control');
+  elements.sideRelease.innerHTML = '<b>单阀侧压</b><span>未动作</span>';
   makePhysical('放大LKJ监控装置', 210, 226, 101, 94, () => lkj.show(), 'lkj-hotspot');
+  makePhysical('警惕／复位', 386, 312, 32, 32, () => {
+    simulation.command('lkj-ack');
+    showCabNotice('警惕／复位已确认');
+  }, 'vigilance-hotspot');
+
+  elements.horn = makePhysical('风笛（按住）', 577, 408, 37, 39, null, 'horn-hotspot');
+  elements.horn.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    hornPointerId = event.pointerId;
+    elements.horn.classList.add('pressed');
+    simulation.command('horn-start');
+    hornAudio.currentTime = 0;
+    hornAudio.play().catch(() => {});
+    elements.horn.setPointerCapture?.(event.pointerId);
+  });
+
+  elements.speedNeedle = makeNeedle('speed-needle', 'HXD1C_SDZ.png', 493, 277, 3, 18, 2, 68, 300, 'speed');
+  elements.mainNeedle = makeNeedle('main-needle', 'HXD1C_red.png', 154, 253, 7, 21, 14, 230, 100);
+  elements.pipeNeedle = makeNeedle('pipe-needle', 'HXD1C_black.png', 154, 253, 7, 21, 14, 230, 130);
+  elements.eqNeedle = makeNeedle('eq-needle', 'HXD1C_black.png', 162, 295, 7, 21, 14, 224, 136);
+  elements.cylNeedle = makeNeedle('cyl-needle', 'HXD1C_red.png', 162, 295, 7, 21, 14, 230, 130);
+  elements.mainNeedle2 = makeNeedle('main-needle-2', 'HXD1C_PPW.png', 75, 299, 7, 18, 1, 3, 358);
+  elements.pipeNeedle2 = makeNeedle('pipe-needle-2', 'HXD1C_PPR.png', 75, 299, 7, 18, 1, 3, 336);
+  elements.eqNeedle2 = makeNeedle('eq-needle-2', 'HXD1C_PPW.png', 36, 312, 7, 18, 1, 3, 336);
+  elements.cylNeedle2 = makeNeedle('cyl-needle-2', 'HXD1C_PPR.png', 36, 312, 7, 18, 1, 3, 300);
+  elements.voltageBar = makeBar('voltage-bar', 351, 266, 4, 30, '#56e9aa');
+  elements.currentBars = [362, 370, 381, 388].map((x, index) => makeBar(`current-${index + 1}`, x, 266, 4, 30));
+  elements.speedDigital = makeDigital('speed-digital', 229, 251, 20, 7);
+  elements.limitDigital = makeDigital('limit-digital', 244, 251, 20, 7, 'limit');
+  elements.clockDigital = makeDigital('clock-digital', 230, 268, 45, 10, 'clock');
 
   const controls = [
     ['auto', elements.auto, 0, 5, 13],
@@ -87,35 +192,74 @@ function createCabControls() {
     const begin = (event) => {
       event.preventDefault();
       const stateKey = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
-      activeDrag = { id, stateKey, pointerId: event.pointerId, startY: event.clientY, startValue: simulation.state[stateKey], min, max, step };
+      activeDrag = { id, stateKey, pointerId: event.pointerId, startY: event.clientY, startValue: simulation.state[stateKey], min, max, step, moved: false };
       event.currentTarget.setPointerCapture?.(event.pointerId);
     };
     sprite.addEventListener('pointerdown', begin);
-    const badge = id === 'auto' ? elements.autoBadge : id === 'independent' ? elements.independentBadge : elements.tractionBadge;
-    badge.addEventListener('pointerdown', begin);
-    badge.addEventListener('click', () => {
-      if (activeDrag) return;
-      const key = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
-      const next = simulation.state[key] >= max ? (id === 'traction' ? 0 : min) : simulation.state[key] + 1;
-      simulation.command(id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction', next);
+    const zones = {
+      auto: [23, 326, 76, 91, '上下拖动自动制动阀'],
+      independent: [121, 326, 78, 91, '上下拖动单独制动阀'],
+      traction: [447, 326, 82, 116, '上下拖动牵引和电制动手柄'],
+    };
+    const zone = makeTouchTarget(id, ...zones[id]);
+    zone.addEventListener('pointerdown', begin);
+    zone.addEventListener('click', () => {
+      if (performance.now() < suppressControlClickUntil) return;
+      adjustControl(id, 1);
     });
+    zone.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowUp' || event.key === 'ArrowRight') { event.preventDefault(); adjustControl(id, 1); }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') { event.preventDefault(); adjustControl(id, -1); }
+      if (event.key === 'Home') { event.preventDefault(); simulation.command(id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction', 0); }
+    });
+    if (id === 'traction') zone.addEventListener('dblclick', () => simulation.command('traction', 0));
   }
-  elements.direction.addEventListener('click', setDirection);
-  elements.directionBadge.addEventListener('click', setDirection);
+  const directionZone = makeTouchTarget('direction', 516, 350, 90, 72, '切换换向手柄');
+  directionZone.addEventListener('click', setDirection);
+  elements.traction.addEventListener('dblclick', () => simulation.command('traction', 0));
+}
+
+function adjustControl(id, delta) {
+  const stateKey = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
+  const type = id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction';
+  const min = id === 'traction' ? -8 : 0;
+  const max = id === 'traction' ? 7 : 5;
+  simulation.command(type, clamp(simulation.state[stateKey] + delta, min, max));
 }
 
 function setDirection() {
-  simulation.command('direction', simulation.state.direction === 'F' ? 'N' : 'F');
+  const current = DIRECTION_POSITIONS.indexOf(simulation.state.direction);
+  const next = DIRECTION_POSITIONS[(current + 1) % DIRECTION_POSITIONS.length];
+  if (!simulation.command('direction', next)) showCabNotice('列车运行中禁止改变换向手柄位置');
+}
+
+function stopHorn(event) {
+  if (hornPointerId == null) return;
+  if (event?.pointerId != null && event.pointerId !== hornPointerId) return;
+  hornPointerId = null;
+  elements.horn?.classList.remove('pressed');
+  hornAudio.pause();
+  hornAudio.currentTime = 0;
+  simulation.command('horn-stop');
 }
 
 window.addEventListener('pointermove', (event) => {
   if (!activeDrag || event.pointerId !== activeDrag.pointerId) return;
   const change = Math.round((activeDrag.startY - event.clientY) / activeDrag.step);
+  if (change !== 0) activeDrag.moved = true;
   const value = clamp(activeDrag.startValue + change, activeDrag.min, activeDrag.max);
   simulation.command(activeDrag.id === 'auto' ? 'auto-brake' : activeDrag.id === 'independent' ? 'independent-brake' : 'traction', value);
 });
-window.addEventListener('pointerup', (event) => { if (activeDrag?.pointerId === event.pointerId) activeDrag = null; });
-window.addEventListener('pointercancel', () => { activeDrag = null; });
+window.addEventListener('pointerup', (event) => {
+  if (activeDrag?.pointerId === event.pointerId) {
+    if (activeDrag.moved) suppressControlClickUntil = performance.now() + 250;
+    activeDrag = null;
+  }
+  stopHorn(event);
+});
+window.addEventListener('pointercancel', (event) => { activeDrag = null; stopHorn(event); });
+window.addEventListener('blur', () => stopHorn());
+window.addEventListener('pagehide', () => stopHorn());
 
 function chooseScenario(id) {
   const scenario = getScenario(id);
@@ -157,19 +301,37 @@ function selectView(view) {
 function render() {
   const s = simulation.state;
   const scenario = simulation.scenario;
-  frame(elements.auto, s.autoBrake, 4, 3);
+  frame(elements.auto, AUTO_BRAKE_SPRITE_FRAMES[s.autoBrake], 4, 3);
   frame(elements.independent, s.independentBrake, 4, 3);
   frame(elements.traction, tractionFrame(s.traction), 2, 8);
   frame(elements.direction, s.direction === 'R' ? 0 : s.direction === 'N' ? 1 : 2, 3, 1);
   elements.autoBadge.querySelector('span').textContent = brakeNames[s.autoBrake];
-  elements.independentBadge.querySelector('span').textContent = s.independentBrake ? `${s.independentBrake}级` : '缓解位';
+  elements.independentBadge.querySelector('span').textContent = INDEPENDENT_BRAKE_POSITIONS[s.independentBrake];
   elements.tractionBadge.querySelector('span').textContent = s.traction > 0 ? `牵引 ${s.traction}级` : s.traction < 0 ? `电制 ${Math.abs(s.traction)}级` : '零位';
   elements.directionBadge.querySelector('span').textContent = s.direction === 'F' ? '前进位' : s.direction === 'R' ? '后退位' : '中立位';
   elements.sideRelease.classList.toggle('active', s.sideRelease);
   elements.sideRelease.querySelector('span').textContent = s.sideRelease ? '已单缓' : '未动作';
+  elements.horn.classList.toggle('active', s.hornActive);
+
+  setNeedle(elements.speedNeedle, s.speed, 158);
+  setNeedle(elements.mainNeedle, s.mainReservoir, 1600);
+  setNeedle(elements.pipeNeedle, s.trainPipe, 1000);
+  setNeedle(elements.eqNeedle, s.equalizingReservoir, 1600);
+  setNeedle(elements.cylNeedle, s.brakeCylinder, 1600);
+  setNeedle(elements.mainNeedle2, s.mainReservoir, 1600);
+  setNeedle(elements.pipeNeedle2, s.trainPipe, 1600);
+  setNeedle(elements.eqNeedle2, s.equalizingReservoir, 1600);
+  setNeedle(elements.cylNeedle2, s.brakeCylinder, 1600);
+  elements.voltageBar.style.transform = 'scaleY(.83)';
+  const load = clamp(Math.max(s.tractionCurrent, s.dynamicBrakeForce / 3700) / 100, 0, 1);
+  elements.currentBars.forEach((bar, index) => { bar.style.transform = `scaleY(${Math.max(.02, load - index * .025)})`; });
+  elements.speedDigital.textContent = s.speed < 10 ? s.speed.toFixed(1) : Math.round(s.speed);
+  elements.limitDigital.textContent = Math.round(s.lkjLimit);
+  elements.clockDigital.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
   $('#phase-name').textContent = s.phase?.label || '坡道考评区段';
   const levelText = { normal: '监控正常', warning: 'LKJ报警', unload: 'LKJ卸载', service: 'LKJ常用制动', emergency: 'LKJ紧急制动' }[s.lkjLevel];
-  $('#status-message').textContent = `${levelText} · 当前坡度 ${s.grade >= 0 ? '+' : ''}${s.grade.toFixed(1)}‰ · 剩余 ${Math.max(0, scenario.finishDistance - s.distance).toFixed(0)} m`;
+  const normalStatus = `${levelText} · 当前坡度 ${s.grade >= 0 ? '+' : ''}${s.grade.toFixed(1)}‰ · 剩余 ${Math.max(0, scenario.finishDistance - s.distance).toFixed(0)} m`;
+  $('#status-message').textContent = performance.now() < cabNoticeUntil ? cabNotice : normalStatus;
   const progress = assessment.progress(s);
   $('#progress-count').textContent = `${progress.done}/${progress.total}`;
   renderProgress(progress);
@@ -194,6 +356,7 @@ function renderData(s) {
   const rows = [
     ['速度', `${s.speed.toFixed(1)} km/h`], ['控制速度', `${s.lkjLimit.toFixed(0)} km/h`],
     ['当前坡度', `${s.grade >= 0 ? '+' : ''}${s.grade.toFixed(1)}‰`], ['运行距离', `${s.distance.toFixed(0)} m`],
+    ['总风缸', `${s.mainReservoir.toFixed(0)} kPa`], ['均衡风缸', `${s.equalizingReservoir.toFixed(0)} kPa`],
     ['首部列车管', `${s.trainPipe.toFixed(0)} kPa`], ['尾部列车管', `${s.tailPipe.toFixed(0)} kPa`],
     ['制动缸', `${s.brakeCylinder.toFixed(0)} kPa`], ['充风状态', s.rechargeReady ? '充分' : '未充分'],
     ['牵引力', `${(s.tractionForce / 1000).toFixed(0)} kN`], ['电制动力', `${(s.dynamicBrakeForce / 1000).toFixed(0)} kN`],
