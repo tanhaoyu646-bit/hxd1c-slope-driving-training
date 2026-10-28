@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,interactive-widget=resizes-content">
+  <meta name="theme-color" content="#06131d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23061925'/%3E%3Cpath d='M8 43L25 25l11 10 20-22M10 48h44' stroke='%2358d7ff' stroke-width='5' fill='none'/%3E%3C/svg%3E">
+  <title>HXD1C 坡道驾驶与调速实操考评</title>
+  <link rel="stylesheet" href="./styles/slope-driving.css">
+</head>
+<body>
+  <main class="training-app" aria-label="HXD1C坡道驾驶与调速实操考评">
+    <section class="stage" id="stage">
+      <canvas id="route-scene" aria-label="列车运行线路"></canvas>
+      <img id="cab-view" class="cab-view" src="./assets/archive-cabview/HXD1C_front.png" alt="HXD1C司机室">
+      <div id="cab-overlay" class="cab-overlay"></div>
+
+      <header class="toolbar">
+        <button type="button" id="callout" class="toolbar-button callout">呼唤确认</button>
+        <button type="button" id="tail-query" class="toolbar-button">列尾查询</button>
+        <button type="button" id="sand" class="toolbar-button action-button">撒砂</button>
+        <button type="button" id="progress-toggle" class="toolbar-button">考评进度 <b id="progress-count">0/7</b></button>
+        <button type="button" id="rules-toggle" class="toolbar-button">考评说明</button>
+        <button type="button" id="view-toggle" class="toolbar-button">视角</button>
+        <button type="button" id="data-toggle" class="toolbar-button">运行数据</button>
+        <button type="button" id="fullscreen" class="toolbar-button icon-button" aria-label="全屏">⛶</button>
+      </header>
+
+      <nav id="view-menu" class="view-menu" aria-label="驾驶视角">
+        <button data-view="front" class="active">前方</button><button data-view="left">左侧</button><button data-view="right">右侧</button><button data-view="rearLeft">左后</button><button data-view="rearRight">右后</button>
+      </nav>
+
+      <aside id="progress-panel" class="side-panel" aria-hidden="true">
+        <div class="panel-head"><strong>考评记录</strong><button data-close-panel>×</button></div>
+        <p>下列 7 项就是本次评分结构。绿色表示已产生有效记录；最终分值还取决于时机、速度和操纵平稳性。</p>
+        <ol id="progress-list"></ol>
+      </aside>
+
+      <aside id="rules-panel" class="side-panel" aria-hidden="true">
+        <div class="panel-head"><strong>考评说明</strong><button data-close-panel>×</button></div>
+        <ul>
+          <li>上坡按“先闯后爬、闯爬结合”组织：限速内储备动能，逐级加载；进入长坡后速度自然下降并不等于操作错误。</li>
+          <li>下坡在入坡前建立动力制动，以动力制动承担持续制动力，空气制动仅在速度上沿补充。</li>
+          <li>空气制动采用一次有效减压并等待传播；缓解时保留动力制动，确认首尾列车管充分充风。</li>
+          <li>空电联锁按机车制动缸压力判断：列车空气制动可与动力制动配合，单独制动使机车制动缸达到 90 kPa 时切除动力制动。</li>
+          <li>撒砂不是固定步骤：无空转不撒砂同样可得满分；出现空转时及时降载，必要时撒砂。</li>
+          <li>LKJ常用、紧急制动以及坡停均按安全红线处理。</li>
+        </ul>
+      </aside>
+
+      <aside id="data-panel" class="side-panel data-panel" aria-hidden="true">
+        <div class="panel-head"><strong>运行数据</strong><button data-close-panel>×</button></div>
+        <dl id="run-data"></dl>
+      </aside>
+
+      <section class="slope-hud" aria-label="线路纵断面">
+        <div class="slope-hud-head"><b>线路纵断面</b><span id="adhesion-state">黏着正常</span></div>
+        <div class="motion-readout"><span>目标 <b id="target-speed">—</b></span><span>趋势 <b id="speed-trend">—</b></span><span>冲动 <b id="shock-state">低</b></span></div>
+        <div id="slope-profile"></div>
+      </section>
+
+      <div id="status-strip" class="status-strip" aria-live="polite">
+        <b id="skill-name">坡道驾驶</b><span id="phase-name">准备开始</span><em id="status-message">仅考评模式</em>
+      </div>
+
+      <section id="lkj-dock" class="lkj-dock" aria-hidden="true">
+        <button type="button" class="lkj-close" data-lkj-close aria-label="关闭LKJ放大界面">×</button>
+        <div class="lkj-device">
+          <img src="./assets/lkj/native-states/main-blank.png" alt="LKJ2000监控装置">
+          <div class="lkj-screen"></div>
+          <div class="lkj-keypad"></div>
+        </div>
+      </section>
+
+      <section id="skill-picker" class="modal open">
+        <div class="picker-card">
+          <span class="eyebrow">HXD1C · 货物列车坡道操纵</span>
+          <h1>坡道驾驶与调速考评</h1>
+          <p>请选择独立考评项目。两项考评分别创建运行状态，不读取或写入其他训练项目。</p>
+          <div class="skill-grid">
+            <button type="button" data-scenario="uphill"><b>长大上坡道驾驶与调速</b><span>约 2800 t · +12‰核心坡段 · 坡前储能、坡中牵引、坡顶预判</span><em>查看任务与评分</em></button>
+            <button type="button" data-scenario="downhill"><b>长大下坡道调速与制动</b><span>约 4200 t · -13‰连续6 km · 动力制动、空气补充、缓解充风</span><em>查看任务与评分</em></button>
+          </div>
+          <small>独立教学仿真项目；正式操纵标准仍以本线路操纵示意图、机务段细则和当次行车条件为准。</small>
+        </div>
+      </section>
+
+      <section id="briefing-modal" class="modal" aria-hidden="true">
+        <div class="briefing-card">
+          <span class="eyebrow">任务书 · 开始前必读</span>
+          <h2 id="briefing-title">考评任务</h2>
+          <div id="briefing-meta" class="briefing-meta"></div>
+          <p id="briefing-physics" class="briefing-physics"></p>
+          <h3>本次只看 7 项评分</h3>
+          <ol id="briefing-scores" class="briefing-scores"></ol>
+          <p class="briefing-note">目标不是逐字照抄固定步骤，而是在规定时机、速度带和设备逻辑内完成操纵。安全红线会把总分封顶为 59 分。</p>
+          <div class="result-actions"><button type="button" id="briefing-back">返回选择</button><button type="button" id="briefing-start" class="primary">我已了解，开始考评</button></div>
+        </div>
+      </section>
+
+      <section id="result-modal" class="modal" aria-hidden="true">
+        <div class="result-card">
+          <span class="eyebrow">考评结束</span>
+          <h2 id="result-title">考评结果</h2>
+          <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
+          <p id="result-summary"></p>
+          <div id="result-categories" class="result-categories"></div>
+          <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button></div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="./scripts/slopeDrivingApp.js"></script>
+</body>
+</html>
