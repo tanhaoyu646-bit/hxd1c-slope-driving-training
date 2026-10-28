@@ -46,7 +46,13 @@ export class MstsRouteScene {
     this.profile = options.profile || 'departure';
     this.isLookout = this.profile === 'lookout';
     this.isPowerTraining = this.profile === 'power-training';
-    this.isCorridor = this.isLookout || this.isPowerTraining;
+    this.isSlopeTraining = this.profile === 'slope-training';
+    this.isCorridor = this.isLookout || this.isPowerTraining || this.isSlopeTraining;
+    this.corridorStartDistance = Math.max(0, Number(options.corridorStartDistance) || 0);
+    this.corridorEndDistance = Math.max(
+      this.corridorStartDistance + 500,
+      Number(options.corridorEndDistance) || LOOKOUT_TRAINING_CONFIG.finishDistance + 500,
+    );
     this.renderOptions = this.isCorridor ? LOOKOUT_ROUTE_RENDER_OPTIONS : DEFAULT_ROUTE_RENDER_OPTIONS;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     const coarse = matchMedia('(pointer: coarse)').matches;
@@ -158,8 +164,10 @@ export class MstsRouteScene {
       this.buildPassengerConsist(12);
       // 瞭望项目的本务主线在加载时一次性生成到 TrackDB 路径终点。
       // 课程仍在6 km结算，但不再因考核终点人为截断三维钢轨。
-      const renderedRouteDistance = this.isCorridor
-        ? this.pathLength
+      const renderedRouteDistance = this.isSlopeTraining
+        ? Math.min(this.pathLength, this.corridorEndDistance)
+        : this.isCorridor
+          ? this.pathLength
         : Math.min(this.pathLength, LOOKOUT_TRAINING_CONFIG.finishDistance + 350);
       const railEvent = LOOKOUT_TRAINING_CONFIG.events.find((item) => item.visualKind === 'rail');
       if (this.renderOptions.proceduralTrack) this.buildSelectedRouteTrack(renderedRouteDistance);
@@ -254,7 +262,7 @@ export class MstsRouteScene {
   buildTerrainCorridorIndex() {
     const cellSize = 32;
     const outerWidth = 24;
-    const maximumDistance = Math.min(this.pathLength, LOOKOUT_TRAINING_CONFIG.finishDistance + 350);
+    const maximumDistance = Math.min(this.pathLength, this.corridorEndDistance);
     const cells = new Map();
     const segments = [];
     for (let index = 1; index < this.routePoints.length; index += 1) {
@@ -380,13 +388,14 @@ export class MstsRouteScene {
     const instancesByShape = new Map();
     data.instances.forEach((instance) => {
       const projection = this.isCorridor
-        ? this.projectPointToPath(instance.position, LOOKOUT_TRAINING_CONFIG.finishDistance + 500)
+        ? this.projectPointToPath(instance.position, this.corridorEndDistance)
         : null;
       if (this.isCorridor) {
         // 瞭望项目只保留0–6 km教学走廊及其周边可见场景，不把原线路
         // 数十公里的远程实例一起提交给渲染器。
         if (!projection
-          || projection.alongDistance > LOOKOUT_TRAINING_CONFIG.finishDistance + 500
+          || projection.alongDistance < this.corridorStartDistance
+          || projection.alongDistance > this.corridorEndDistance
           || projection.lateralDistance > 450) return;
         const tunnel = LOOKOUT_TRAINING_CONFIG.events.find((item) => item.visualKind === 'tunnel');
         const insideTeachingTunnel = projection
@@ -395,7 +404,7 @@ export class MstsRouteScene {
           && Math.abs(projection.signedLateral) <= 12;
         // 教学隧道已自带轨道、洞壁和洞门，清除这一小段原露天线路上的
         // 接触网杆、信号和轨道，避免它们穿入隧道内部。
-        if (insideTeachingTunnel) return;
+        if (this.isLookout && insideTeachingTunnel) return;
 
         // 本项目只显示与当前考核相关、由 powerTrainingScene 按正确顺序
         // 放置的标志；保留原项目中的这些对象会叠出第二套错误序列。
@@ -407,11 +416,11 @@ export class MstsRouteScene {
         // 原接触网杆的对象原点位于原轨道中心，真正的杆柱约在局部 +X 3 m。
         // 主线中心线重建后，少数杆柱会侵入新线路。按实际杆柱位置做净空判断，
         // 将侵线杆记录下来，稍后沿最终中心线原位重建，而不是只删掉造成断档。
-        if (/^SweGantry1\.s$/i.test(instance.shape || '')) {
+        if (this.isLookout && /^SweGantry1\.s$/i.test(instance.shape || '')) {
           const instancePosition = new THREE.Vector3().fromArray(instance.position);
           const instanceQuaternion = new THREE.Quaternion().fromArray(instance.quaternion).normalize();
           const mastPosition = new THREE.Vector3(3, 0, 0).applyQuaternion(instanceQuaternion).add(instancePosition);
-          const mastProjection = this.projectPointToPath(mastPosition.toArray(), LOOKOUT_TRAINING_CONFIG.finishDistance + 350);
+          const mastProjection = this.projectPointToPath(mastPosition.toArray(), this.corridorEndDistance);
           if (mastProjection
             && Math.abs(mastProjection.signedLateral) < 2.65
             && Math.abs(mastProjection.verticalOffset || 0) < 3) {
@@ -424,7 +433,7 @@ export class MstsRouteScene {
         const trackProjection = projection || this.projectPointToPath(instance.position);
         if (trackProjection
           && trackProjection.lateralDistance < 4.2
-          && trackProjection.alongDistance <= LOOKOUT_TRAINING_CONFIG.finishDistance + 500) return;
+          && trackProjection.alongDistance <= this.corridorEndDistance) return;
       }
       if (this.renderOptions.continuousRailHeads && instance.type === 'TrackObj' && /^A\d+t/i.test(instance.shape || '')) {
         const trackProjection = projection || this.projectPointToPath(instance.position);
@@ -432,7 +441,7 @@ export class MstsRouteScene {
         // 同一中心线的实体钢轨头和连续轨枕承担，保留侧线和其他原轨道场景。
         if (trackProjection
           && trackProjection.lateralDistance < 4.2
-          && trackProjection.alongDistance <= LOOKOUT_TRAINING_CONFIG.finishDistance + 500) return;
+          && trackProjection.alongDistance <= this.corridorEndDistance) return;
       }
       if (!instancesByShape.has(instance.shape)) instancesByShape.set(instance.shape, []);
       instancesByShape.get(instance.shape).push(instance);
@@ -1221,7 +1230,9 @@ export class MstsRouteScene {
       const definition = definitions[instance.shape];
       if (instance.type !== 'SignalObj' || !definition) continue;
       const projection = this.projectPointToPath(instance.position);
-      if (!projection || projection.alongDistance > LOOKOUT_TRAINING_CONFIG.finishDistance + 500) continue;
+      if (!projection
+        || projection.alongDistance < this.corridorStartDistance
+        || projection.alongDistance > this.corridorEndDistance) continue;
       if (projection.lateralDistance > 8.5) continue;
       const overlapsDeparture = [this.departureSignal, this.neighborSignal].some((signal) => (
         signal && Math.abs(signal.projection.alongDistance - projection.alongDistance) < 1.5

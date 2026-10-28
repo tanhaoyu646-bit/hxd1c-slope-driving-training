@@ -3,7 +3,11 @@ import { MstsRouteScene } from './mstsRouteScene.js';
 
 export class SlopeDrivingScene extends MstsRouteScene {
   constructor(canvas, scenario) {
-    super(canvas, { profile: 'power-training' });
+    super(canvas, {
+      profile: 'slope-training',
+      corridorStartDistance: scenario.corridor.start,
+      corridorEndDistance: scenario.corridor.end,
+    });
     this.slopeScenario = scenario;
     this.startOffset = scenario.startOffset;
     this.slopeBoards = [];

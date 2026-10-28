@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AUTO_BRAKE_SPRITE_FRAMES,
+  BRAKE_POSITIONS,
+  INDEPENDENT_BRAKE_MAX,
   INDEPENDENT_BRAKE_POSITIONS,
   SCENARIOS,
   gradeAt,
@@ -59,8 +61,8 @@ function runDownhill() {
               : s.distance < 8200 ? -8
                 : s.distance < 9400 ? -6 : -4;
     if (nextTraction !== targetTraction) { sim.command('traction', nextTraction); targetTraction = nextTraction; }
-    if (brakePhase === 0 && s.distance > 2250) { sim.command('auto-brake', 1); brakePhase = 1; }
-    else if (brakePhase === 1 && s.distance > 7600 && s.speed < 51.8) { sim.command('auto-brake', 0); brakePhase = 2; }
+    if (brakePhase === 0 && s.distance > 2250) { sim.command('auto-brake', 2); brakePhase = 1; }
+    else if (brakePhase === 1 && s.distance > 7600 && s.speed < 51.8) { sim.command('auto-brake', 1); brakePhase = 2; }
   });
 }
 
@@ -72,18 +74,28 @@ test('项目包含独立上坡和下坡配置以及真实坡度区段', () => {
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8199), 70);
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8200), 55);
   assert.equal(SCENARIOS.downhill.nominalPipePressure, 500);
+  assert.equal(SCENARIOS.uphill.routeLabel, '内江—内江南两站一区间');
+  assert.equal(SCENARIOS.uphill.startOffset, 1250);
+  assert.equal(SCENARIOS.downhill.startOffset + SCENARIOS.downhill.finishDistance, 11_450);
+  assert.ok(SCENARIOS.downhill.startOffset + SCENARIOS.downhill.finishDistance < SCENARIOS.downhill.corridor.end);
   assert.equal(SCENARIOS.uphill.assessmentItems.length, 7);
   assert.equal(SCENARIOS.downhill.assessmentItems.reduce((sum, item) => sum + item.points, 0), 100);
 });
 
 test('驾驶台手柄贴图、位置名称和运行联锁与仿真状态对应', () => {
   assert.deepEqual([...AUTO_BRAKE_SPRITE_FRAMES], [0, 1, 2, 9, 10, 11]);
-  assert.deepEqual([...INDEPENDENT_BRAKE_POSITIONS], ['缓解位', '制动Ⅰ', '制动Ⅱ', '制动Ⅲ', '制动Ⅳ', '全制动位']);
+  assert.equal(INDEPENDENT_BRAKE_POSITIONS.length, 12);
+  assert.equal(INDEPENDENT_BRAKE_MAX, 11);
+  assert.equal(BRAKE_POSITIONS[1].label, '运转／缓解位');
+  assert.equal(BRAKE_POSITIONS[2].label, '制动区（初减压）');
   const simulation = new SlopeDrivingSimulation('uphill');
   assert.equal(simulation.command('direction', 'N'), false);
   assert.equal(simulation.state.direction, 'F');
   assert.ok(simulation.state.events.some((event) => event.type === 'direction-while-moving'));
   simulation.state.speed = 0;
+  simulation.command('traction', 1);
+  assert.equal(simulation.command('direction', 'N'), false);
+  simulation.command('traction', 0);
   assert.equal(simulation.command('direction', 'N'), true);
   assert.equal(simulation.command('direction', 'R'), true);
   assert.equal(simulation.state.direction, 'R');
@@ -112,7 +124,9 @@ test('下坡满分轨迹包含动力制动、空气补充、先缓解空气和�
   assert.equal(simulation.state.completed, true);
   assert.ok(simulation.state.events.some((event) => event.type === 'traction' && event.value < 0));
   assert.ok(simulation.state.events.some((event) => event.type === 'auto-brake' && event.value > 0));
-  assert.ok(simulation.state.events.some((event) => event.type === 'auto-brake' && event.value === 0 && event.previous?.autoBrake > 0));
+  assert.ok(simulation.state.events.some((event) => event.type === 'auto-brake'
+    && BRAKE_POSITIONS[event.value].reduction === 0
+    && BRAKE_POSITIONS[event.previous?.autoBrake].reduction > 0));
   assert.ok(simulation.state.events.some((event) => event.type === 'recharge-ready'));
   assert.ok(simulation.state.samples.some((sample) => sample.distance >= 8200 && sample.speed <= 55));
   assert.equal(result.redline, false);
@@ -122,12 +136,12 @@ test('下坡满分轨迹包含动力制动、空气补充、先缓解空气和�
 test('空电联锁区分列车制动缸与机车制动缸，单阀达到90 kPa后切除动力制动', () => {
   const simulation = new SlopeDrivingSimulation('downhill');
   simulation.command('traction', -4);
-  simulation.command('auto-brake', 1);
+  simulation.command('auto-brake', 2);
   for (let index = 0; index < 700; index += 1) simulation.tick(.05);
   assert.ok(simulation.state.trainBrakeCylinder > 50);
   assert.ok(simulation.state.locomotiveCylinder < 90);
   assert.ok(simulation.state.dynamicBrakeForce > 0);
-  simulation.command('independent-brake', 2);
+  simulation.command('independent-brake', 4);
   for (let index = 0; index < 100; index += 1) simulation.tick(.05);
   assert.equal(simulation.state.dynamicBrakeForce, 0);
 });

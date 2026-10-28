@@ -1,7 +1,9 @@
 import {
   AUTO_BRAKE_SPRITE_FRAMES,
+  BRAKE_POSITIONS,
   CAB,
   DIRECTION_POSITIONS,
+  INDEPENDENT_BRAKE_MAX,
   INDEPENDENT_BRAKE_POSITIONS,
   PROJECT_ID,
   getScenario,
@@ -15,7 +17,6 @@ const $ = (selector) => document.querySelector(selector);
 const pct = (value, total) => `${value / total * 100}%`;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const views = { front: 'HXD1C_front.png', left: 'HXD1C_left_full.png', right: 'HXD1C_right_full.png', rearLeft: 'HXD1C_left.png', rearRight: 'HXD1C_right.png' };
-const brakeNames = ['运转位', '初制位', '常用Ⅱ', '常用Ⅲ', '常用Ⅳ', '紧急位'];
 
 let simulation = new SlopeDrivingSimulation('uphill');
 let assessment = new SlopeDrivingAssessment(simulation);
@@ -31,6 +32,7 @@ let lastAlertLevel = 'normal';
 let cabNotice = '';
 let cabNoticeUntil = 0;
 let hornPointerId = null;
+let sideReleasePointerId = null;
 let pendingScenarioId = 'uphill';
 const overlay = $('#cab-overlay');
 const elements = {};
@@ -121,7 +123,7 @@ function makePhysical(label, x, y, width, height, handler, className = '') {
   element.className = `physical-control ${className}`;
   element.setAttribute('aria-label', label);
   Object.assign(element.style, { left: pct(x, CAB.width), top: pct(y, CAB.height), width: pct(width, CAB.width), height: pct(height, CAB.height) });
-  element.addEventListener('click', handler);
+  if (handler) element.addEventListener('click', handler);
   overlay.append(element);
   return element;
 }
@@ -146,12 +148,15 @@ function createCabControls() {
   elements.independentBadge = makeBadge('单阀', 116, 311, 78);
   elements.tractionBadge = makeBadge('牵引/电制', 433, 315, 96);
   elements.directionBadge = makeBadge('换向手柄', 521, 331, 88);
-  elements.sideRelease = makePhysical('单阀侧压：单独缓解机车制动缸', 116, 405, 82, 27, () => {
-    const next = !simulation.state.sideRelease;
-    simulation.command('side-release', next);
-    showCabNotice(next ? '单阀侧压：机车制动缸单独缓解' : '单阀侧压已释放');
-  }, 'side-release-control');
-  elements.sideRelease.innerHTML = '<b>单阀侧压</b><span>未动作</span>';
+  elements.sideRelease = makePhysical('单缓按钮：按住时单独缓解机车制动缸', 116, 405, 82, 27, null, 'side-release-control');
+  elements.sideRelease.innerHTML = '<b>单缓按钮</b><span>按住动作</span>';
+  elements.sideRelease.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    sideReleasePointerId = event.pointerId;
+    elements.sideRelease.setPointerCapture?.(event.pointerId);
+    simulation.command('side-release', true);
+    showCabNotice('单缓按钮已按下：机车制动缸单独缓解');
+  });
   makePhysical('放大LKJ监控装置', 210, 226, 101, 94, () => lkj.show(), 'lkj-hotspot');
   makePhysical('警惕／复位', 386, 312, 32, 32, () => {
     simulation.command('lkj-ack');
@@ -186,7 +191,7 @@ function createCabControls() {
 
   const controls = [
     ['auto', elements.auto, 0, 5, 13],
-    ['independent', elements.independent, 0, 5, 13],
+    ['independent', elements.independent, 0, INDEPENDENT_BRAKE_MAX, 6],
     ['traction', elements.traction, -8, 7, 19],
   ];
   for (const [id, sprite, min, max, step] of controls) {
@@ -224,14 +229,22 @@ function adjustControl(id, delta) {
   const stateKey = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
   const type = id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction';
   const min = id === 'traction' ? -8 : 0;
-  const max = id === 'traction' ? 7 : 5;
+  const max = id === 'traction' ? 7 : id === 'independent' ? INDEPENDENT_BRAKE_MAX : 5;
   simulation.command(type, clamp(simulation.state[stateKey] + delta, min, max));
 }
 
 function setDirection() {
   const current = DIRECTION_POSITIONS.indexOf(simulation.state.direction);
   const next = DIRECTION_POSITIONS[(current + 1) % DIRECTION_POSITIONS.length];
-  if (!simulation.command('direction', next)) showCabNotice('列车运行中禁止改变换向手柄位置');
+  if (!simulation.command('direction', next)) showCabNotice('换向联锁：列车须停车且牵引／电制动手柄须回零');
+}
+
+function stopSideRelease(event) {
+  if (sideReleasePointerId == null) return;
+  if (event?.pointerId != null && event.pointerId !== sideReleasePointerId) return;
+  sideReleasePointerId = null;
+  simulation.command('side-release', false);
+  showCabNotice('单缓按钮已松开');
 }
 
 function stopHorn(event) {
@@ -257,10 +270,11 @@ window.addEventListener('pointerup', (event) => {
     activeDrag = null;
   }
   stopHorn(event);
+  stopSideRelease(event);
 });
-window.addEventListener('pointercancel', (event) => { activeDrag = null; stopHorn(event); });
-window.addEventListener('blur', () => stopHorn());
-window.addEventListener('pagehide', () => stopHorn());
+window.addEventListener('pointercancel', (event) => { activeDrag = null; stopHorn(event); stopSideRelease(event); });
+window.addEventListener('blur', () => { stopHorn(); stopSideRelease(); });
+window.addEventListener('pagehide', () => { stopHorn(); stopSideRelease(); });
 
 function chooseScenario(id) {
   const scenario = getScenario(id);
@@ -323,12 +337,12 @@ function render() {
   frame(elements.independent, s.independentBrake, 4, 3);
   frame(elements.traction, tractionFrame(s.traction), 2, 8);
   frame(elements.direction, s.direction === 'R' ? 0 : s.direction === 'N' ? 1 : 2, 3, 1);
-  elements.autoBadge.querySelector('span').textContent = brakeNames[s.autoBrake];
+  elements.autoBadge.querySelector('span').textContent = BRAKE_POSITIONS[s.autoBrake].label;
   elements.independentBadge.querySelector('span').textContent = INDEPENDENT_BRAKE_POSITIONS[s.independentBrake];
   elements.tractionBadge.querySelector('span').textContent = s.traction > 0 ? `牵引 ${s.traction}级` : s.traction < 0 ? `电制 ${Math.abs(s.traction)}级` : '零位';
   elements.directionBadge.querySelector('span').textContent = s.direction === 'F' ? '前进位' : s.direction === 'R' ? '后退位' : '中立位';
   elements.sideRelease.classList.toggle('active', s.sideRelease);
-  elements.sideRelease.querySelector('span').textContent = s.sideRelease ? '已单缓' : '未动作';
+  elements.sideRelease.querySelector('span').textContent = s.sideRelease ? '按下' : '按住动作';
   elements.horn.classList.toggle('active', s.hornActive);
 
   setNeedle(elements.speedNeedle, s.speed, 158);

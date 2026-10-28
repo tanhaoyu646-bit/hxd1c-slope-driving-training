@@ -6,20 +6,36 @@ export const CAB = Object.freeze({ width: 640, height: 480 });
 // 前三帧位于第一行，后三帧位于最后一行。
 export const AUTO_BRAKE_SPRITE_FRAMES = Object.freeze([0, 1, 2, 9, 10, 11]);
 
+// 原游戏 HXD1C.cvf 将单独制动阀定义为 12 帧连续手柄，而不是 6 个固定档位。
+// 网页端以 12 个可见帧离散连续行程，物理量仍按 0—100% 线性换算。
 export const INDEPENDENT_BRAKE_POSITIONS = Object.freeze([
-  '缓解位', '制动Ⅰ', '制动Ⅱ', '制动Ⅲ', '制动Ⅳ', '全制动位',
+  '缓解位 0%', '制动 10%', '制动 20%', '制动 30%',
+  '制动 40%', '制动 50%', '制动 60%', '制动 70%',
+  '制动 80%', '制动 90%', '制动 95%', '全制动位 100%',
 ]);
+
+export const INDEPENDENT_BRAKE_MAX = INDEPENDENT_BRAKE_POSITIONS.length - 1;
 
 export const DIRECTION_POSITIONS = Object.freeze(['F', 'N', 'R']);
 
 export const BRAKE_POSITIONS = Object.freeze([
-  { value: 0, label: '运转位', reduction: 0 },
-  { value: 1, label: '初制位', reduction: 50 },
-  { value: 2, label: '常用Ⅱ', reduction: 90 },
-  { value: 3, label: '常用Ⅲ', reduction: 130 },
-  { value: 4, label: '常用Ⅳ', reduction: 170 },
+  { value: 0, label: '快速缓解位', reduction: 0 },
+  { value: 1, label: '运转／缓解位', reduction: 0 },
+  { value: 2, label: '制动区（初减压）', reduction: 50 },
+  { value: 3, label: '全制动位', reduction: 130 },
+  { value: 4, label: '持续制动位', reduction: 170 },
   { value: 5, label: '紧急位', reduction: 600 },
 ]);
+
+// 与“途中过分相”使用同一内江—内江南两站一区间。场景窗口包含两端站场，
+// 训练从出站后的 1.25 km 开始，最长任务在到达内江南站前结束。
+export const NEIJIANG_NEIJIANGNAN_CORRIDOR = Object.freeze({
+  id: 'neijiang-neijiangnan',
+  label: '内江—内江南两站一区间',
+  start: 0,
+  end: 12_150,
+  trainingStart: 1_250,
+});
 
 const uphillProfile = Object.freeze([
   { id: 'approach', start: 0, end: 1500, gradeStart: 0, gradeEnd: 2, label: '坡前闯坡准备区', targetMin: 63, targetMax: 70 },
@@ -71,11 +87,12 @@ export const SCENARIOS = Object.freeze({
     adhesionZones: [{ start: 3300, end: 3900, coefficient: .255, label: '林荫湿轨低黏着区' }],
     initialSpeed: 67,
     initialTraction: 0,
-    startOffset: 18_500,
+    startOffset: NEIJIANG_NEIJIANGNAN_CORRIDOR.trainingStart,
     finishDistance: 9800,
     lineLimit: 70,
     targetBand: [40, 68],
-    routeLabel: '坡前—长大上坡—坡顶',
+    routeLabel: NEIJIANG_NEIJIANGNAN_CORRIDOR.label,
+    corridor: NEIJIANG_NEIJIANGNAN_CORRIDOR,
     profile: uphillProfile,
     assessmentItems: uphillAssessmentItems,
     physicalExpectation: '坡前速度接近限速；进入+12‰长坡后，即使保持较高牵引，速度也应逐步下降；越过坡顶后速度重新回升。',
@@ -100,11 +117,12 @@ export const SCENARIOS = Object.freeze({
     adhesionZones: [],
     initialSpeed: 58,
     initialTraction: 0,
-    startOffset: 18_300,
+    startOffset: NEIJIANG_NEIJIANGNAN_CORRIDOR.trainingStart,
     finishDistance: 10200,
     lineLimit: 70,
     targetBand: [45, 60],
-    routeLabel: '坡顶—长大下坡—限速区',
+    routeLabel: NEIJIANG_NEIJIANGNAN_CORRIDOR.label,
+    corridor: NEIJIANG_NEIJIANGNAN_CORRIDOR,
     profile: downhillProfile,
     assessmentItems: downhillAssessmentItems,
     physicalExpectation: '进入-13‰长坡后列车持续增速；再生制动先承担持续制动力，空气制动用于补充，缓解后必须等待全列充分充风。',

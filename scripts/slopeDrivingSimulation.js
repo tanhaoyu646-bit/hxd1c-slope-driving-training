@@ -3,6 +3,7 @@ import {
   BRAKE_POSITIONS,
   getScenario,
   gradeAt,
+  INDEPENDENT_BRAKE_MAX,
   lineLimitAt,
   lkjControlLimit,
   phaseAt,
@@ -37,7 +38,8 @@ export class SlopeDrivingSimulation extends EventTarget {
       couplerForce: 0,
       traction: scenario.initialTraction,
       direction: 'F',
-      autoBrake: 0,
+      // 原游戏运行初始位置为运转／缓解位（CVF 第 1 帧）；第 0 帧保留为快速缓解位。
+      autoBrake: 1,
       independentBrake: 0,
       sideRelease: false,
       hornActive: false,
@@ -109,7 +111,7 @@ export class SlopeDrivingSimulation extends EventTarget {
     };
     if (type === 'traction') s.traction = clamp(Math.round(Number(value) || 0), -8, 7);
     else if (type === 'auto-brake') s.autoBrake = clamp(Math.round(Number(value) || 0), 0, 5);
-    else if (type === 'independent-brake') s.independentBrake = clamp(Math.round(Number(value) || 0), 0, 5);
+    else if (type === 'independent-brake') s.independentBrake = clamp(Math.round(Number(value) || 0), 0, INDEPENDENT_BRAKE_MAX);
     else if (type === 'side-release') s.sideRelease = Boolean(value);
     else if (type === 'sand') {
       s.sandRemaining = Math.max(s.sandRemaining, 5);
@@ -120,8 +122,13 @@ export class SlopeDrivingSimulation extends EventTarget {
       this.log('tail-query', { tailPipe: s.tailPipe, headPipe: s.trainPipe });
     } else if (type === 'direction') {
       if (!['F', 'N', 'R'].includes(value)) return false;
-      if (s.speed > 1) {
-        this.log('direction-while-moving', { requested: value, retained: s.direction });
+      if (s.speed > 1 || s.traction !== 0) {
+        this.log('direction-interlock', {
+          requested: value,
+          retained: s.direction,
+          reason: s.speed > 1 ? 'moving' : 'combined-control-not-zero',
+        });
+        if (s.speed > 1) this.log('direction-while-moving', { requested: value, retained: s.direction });
         return false;
       }
       s.direction = value;
@@ -156,7 +163,13 @@ export class SlopeDrivingSimulation extends EventTarget {
       const before = type === 'side-release' ? Number(previous.sideRelease) : Number(previous[key]);
       const after = type === 'side-release' ? Number(s.sideRelease) : Number(s[key]);
       const step = Math.abs(after - before);
-      const impulse = type === 'auto-brake' ? step * 10 : type === 'traction' ? step * 7 : step * 6;
+      const impulse = type === 'auto-brake'
+        ? step * 10
+        : type === 'traction'
+          ? step * 7
+          : type === 'independent-brake'
+            ? step * (30 / INDEPENDENT_BRAKE_MAX)
+            : step * 6;
       s.controlShock = clamp(s.controlShock + impulse, 0, 100);
       this.log(type, { value: s[key], previous });
     }
@@ -200,7 +213,7 @@ export class SlopeDrivingSimulation extends EventTarget {
 
     const effectivePipe = s.trainPipe * .42 + s.tailPipe * .58;
     const automaticCylinder = clamp((nominalPipe - effectivePipe) / 170 * 350, 0, 430);
-    const independentCylinder = s.independentBrake * 62;
+    const independentCylinder = s.independentBrake / INDEPENDENT_BRAKE_MAX * 310;
     s.trainBrakeCylinder += (automaticCylinder - s.trainBrakeCylinder) * (1 - Math.exp(-dt / 2.5));
     const dynamicRequested = s.traction < 0 && independentCylinder < 90;
     const desiredLoco = dynamicRequested
@@ -230,7 +243,7 @@ export class SlopeDrivingSimulation extends EventTarget {
     const thermalDerate = clamp(1 - Math.max(0, s.tractionThermal - 18) / 70, .66, 1);
     s.wheelSlip = requestedTraction > adhesion * 1.01 && s.traction > 0;
     const adhesionForce = s.wheelSlip ? adhesion * .92 : adhesion;
-    s.tractionForce = s.autoBrake === 0 && s.lkjForcedBrake === 0
+    s.tractionForce = requestedReduction === 0 && s.lkjForcedBrake === 0
       ? Math.min(requestedTraction, adhesionForce) * thermalDerate
       : 0;
     s.tractionCurrent = s.tractionForce / 370_000 * 100;

@@ -1,8 +1,11 @@
+import { BRAKE_POSITIONS } from './slopeDrivingConfig.js';
+
 const between = (value, min, max) => value >= min && value <= max;
 const clampScore = (value) => Math.max(0, value);
 const samplesBetween = (samples, min, max) => samples.filter((sample) => between(sample.distance, min, max));
 const eventJump = (event, key) => Math.abs(event.value - (event.previous?.[key] ?? event.value));
 const category = (name, score, maximum, evidence) => ({ name, score: clampScore(score), maximum, evidence });
+const brakeReduction = (position) => BRAKE_POSITIONS[position]?.reduction || 0;
 
 export class SlopeDrivingAssessment {
   constructor(simulation) {
@@ -29,7 +32,7 @@ export class SlopeDrivingAssessment {
         && events.some((item) => item.type === 'callout'),
       state.distance >= 2200 && events.some((item) => item.type === 'traction' && item.value < 0 && item.distance < 2200),
       state.distance >= 8200 && samplesBetween(samples, 2200, 8200).some((item) => between(item.speed, 48, 60)),
-      events.some((item) => item.type === 'auto-brake' && item.value > 0),
+      events.some((item) => item.type === 'auto-brake' && brakeReduction(item.value) > 0),
       events.some((item) => item.type === 'recharge-ready' && item.distance > 2200),
       state.distance >= 8200 && samples.filter((item) => item.distance < 8200).at(-1)?.speed <= 55,
       state.completed,
@@ -152,7 +155,9 @@ export class SlopeDrivingAssessment {
     if (dynamicRatio < .7) descent -= 5;
     categories.push(category('长坡稳速', descent, 20, '动力制动为主，48—60 km/h稳定运行'));
 
-    const applications = events.filter((event) => event.type === 'auto-brake' && event.value > 0 && event.previous?.autoBrake === 0);
+    const applications = events.filter((event) => event.type === 'auto-brake'
+      && brakeReduction(event.value) > 0
+      && brakeReduction(event.previous?.autoBrake) === 0);
     let air = 15;
     if (!applications.length) air -= 8;
     const maximumReduction = Math.max(0, ...samples.map((sample) => this.simulation.scenario.nominalPipePressure - sample.trainPipe));
@@ -161,7 +166,9 @@ export class SlopeDrivingAssessment {
     if (autoEvents.some((event, index) => index > 0 && event.elapsed - autoEvents[index - 1].elapsed < 6)) air -= 3;
     categories.push(category('空气补充制动', air, 15, '速度上沿时一次有效减压，避免频繁小减压'));
 
-    const releases = events.filter((event) => event.type === 'auto-brake' && event.value === 0 && event.previous?.autoBrake > 0);
+    const releases = events.filter((event) => event.type === 'auto-brake'
+      && brakeReduction(event.value) === 0
+      && brakeReduction(event.previous?.autoBrake) > 0);
     let recharge = 15;
     if (!releases.length || releases.some((event) => event.previous?.traction >= 0)) recharge -= 5;
     if (!events.some((event) => event.type === 'recharge-ready' && event.distance > 2200)) recharge -= 6;
