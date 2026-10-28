@@ -4,13 +4,13 @@
 
 | 驾驶台设备 | 操作方式 | 仿真状态/命令 | 可见反馈 |
 | --- | --- | --- | --- |
-| 自动制动阀（自阀） | 在手柄区域上下拖动 | `autoBrake` / `auto-brake` | 6个位置贴图、均衡风缸、列车管、制动缸及空气制动力同步变化 |
+| 自动制动阀（自阀） | 在手柄区域上下拖动 | `autoBrake` / `auto-brake` | 6个位置贴图、均衡风缸、首尾列车管、列车制动缸及空气制动力同步变化 |
 | 单独制动阀（单阀） | 在手柄区域上下拖动 | `independentBrake` / `independent-brake` | 缓解位至全制动位贴图、机车制动缸同步变化 |
 | 单阀侧压 | 点击单阀下方“单阀侧压” | `sideRelease` / `side-release` | 自动制动时单独缓解机车制动缸，列车制动保持 |
 | 牵引/电制动手柄 | 上下拖动；双击回零 | `traction` / `traction` | 牵引1—7级、零位、电制动1—8级贴图，牵引/电制动力和电流条同步变化 |
 | 换向手柄 | 点击手柄区域循环切换 | `direction` / `direction` | 前进—中立—后退三位置；速度大于1 km/h时联锁拒绝换向 |
 | 速度表 | 仪表自动显示 | `speed` | 机械速度表指针、LKJ数字速度和运行数据一致 |
-| 总风、均衡风缸、列车管、制动缸压力表 | 仪表自动显示 | `mainReservoir`、`equalizingReservoir`、`trainPipe`、`brakeCylinder` | 两组机械压力表和运行数据同步 |
+| 总风、均衡风缸、列车管、制动缸压力表 | 仪表自动显示 | `mainReservoir`、`equalizingReservoir`、`trainPipe`、`trainBrakeCylinder`、`locomotiveCylinder` | 机械表显示机车制动缸，运行数据另列全列制动缸代理值；空电联锁按机车缸压判断 |
 | LKJ监控装置 | 点击驾驶台LKJ屏幕 | `lkj-*` | 放大设备、控制速度曲线、报警确认和制动缓解操作 |
 | 警惕/复位 | 点击中部复位热区 | `lkj-ack` | LKJ报警确认并显示短时操作反馈 |
 | 风笛 | 按住右下风笛按钮 | `hornActive` / `horn-start`、`horn-stop` | 按压状态和风笛声音同步，松开或失焦自动停止 |

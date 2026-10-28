@@ -1,5 +1,8 @@
 const between = (value, min, max) => value >= min && value <= max;
-const firstEvent = (events, predicate) => events.find(predicate);
+const clampScore = (value) => Math.max(0, value);
+const samplesBetween = (samples, min, max) => samples.filter((sample) => between(sample.distance, min, max));
+const eventJump = (event, key) => Math.abs(event.value - (event.previous?.[key] ?? event.value));
+const category = (name, score, maximum, evidence) => ({ name, score: clampScore(score), maximum, evidence });
 
 export class SlopeDrivingAssessment {
   constructor(simulation) {
@@ -7,27 +10,36 @@ export class SlopeDrivingAssessment {
   }
 
   progress(state = this.simulation.state) {
-    const e = state.events;
+    const events = state.events;
+    const samples = state.samples;
     const uphill = this.simulation.scenario.id === 'uphill';
     const checks = uphill ? [
-      e.some((item) => item.type === 'lkj-open'),
-      e.some((item) => item.type === 'callout'),
-      e.some((item) => item.type === 'traction' && item.distance < 1400 && item.value >= 4),
-      e.some((item) => item.type === 'sand' && item.distance < 3000),
-      e.some((item) => item.type === 'traction' && item.distance > 7300 && item.value <= 3),
+      events.some((item) => item.type === 'lkj-open')
+        && events.some((item) => item.type === 'tail-query')
+        && events.some((item) => item.type === 'callout'),
+      state.distance >= 1500 && samples.filter((item) => item.distance < 1500 && item.speed >= 63).length >= 5,
+      state.distance >= 2500 && events.some((item) => item.type === 'traction' && item.distance < 2700 && item.value >= 4),
+      state.distance >= 8000 && samplesBetween(samples, 2500, 8000).some((item) => between(item.speed, 40, 62)),
+      state.distance >= 3900 && state.slipDuration <= 6,
+      state.distance >= 8600 && events.some((item) => item.type === 'traction' && between(item.distance, 7600, 8600) && item.value <= 3),
       state.completed,
     ] : [
-      e.some((item) => item.type === 'lkj-open'),
-      e.some((item) => item.type === 'tail-query' && item.distance < 1200),
-      e.some((item) => item.type === 'callout'),
-      e.some((item) => item.type === 'traction' && item.value < 0 && item.distance < 2400),
-      e.some((item) => item.type === 'auto-brake' && item.value > 0),
-      e.some((item) => item.type === 'auto-brake' && item.value === 0 && item.previous?.autoBrake > 0),
-      e.some((item) => item.type === 'recharge-ready' && item.distance > 2000),
-      state.samples.some((sample) => sample.distance >= 8000 && sample.speed <= 55.5),
+      events.some((item) => item.type === 'lkj-open')
+        && events.some((item) => item.type === 'tail-query' && item.distance < 1200)
+        && events.some((item) => item.type === 'callout'),
+      state.distance >= 2200 && events.some((item) => item.type === 'traction' && item.value < 0 && item.distance < 2200),
+      state.distance >= 8200 && samplesBetween(samples, 2200, 8200).some((item) => between(item.speed, 48, 60)),
+      events.some((item) => item.type === 'auto-brake' && item.value > 0),
+      events.some((item) => item.type === 'recharge-ready' && item.distance > 2200),
+      state.distance >= 8200 && samples.filter((item) => item.distance < 8200).at(-1)?.speed <= 55,
       state.completed,
     ];
-    return { done: checks.filter(Boolean).length, total: checks.length, checks };
+    return {
+      done: checks.filter(Boolean).length,
+      total: checks.length,
+      checks,
+      items: this.simulation.scenario.assessmentItems,
+    };
   }
 
   result(state = this.simulation.state) {
@@ -50,41 +62,61 @@ export class SlopeDrivingAssessment {
     const categories = [];
 
     let preparation = 10;
-    if (!events.some((event) => event.type === 'lkj-open')) preparation -= 4;
-    if (!events.some((event) => event.type === 'callout')) preparation -= 3;
-    if (!events.some((event) => event.type === 'tail-query')) preparation -= 3;
-    categories.push({ name: '坡道与设备确认', score: Math.max(0, preparation), maximum: 10 });
+    if (!events.some((event) => event.type === 'lkj-open' && event.distance < 1500)) preparation -= 4;
+    if (!events.some((event) => event.type === 'tail-query' && event.distance < 1500)) preparation -= 3;
+    if (!events.some((event) => event.type === 'callout' && event.distance < 1500)) preparation -= 3;
+    categories.push(category('坡前确认', preparation, 10, 'LKJ、列尾、呼唤应答在坡前完成'));
 
-    const earlyTraction = firstEvent(events, (event) => event.type === 'traction' && event.value >= 4);
-    let approach = 15;
-    if (!earlyTraction || !between(earlyTraction.distance, 100, 1450)) approach -= 10;
-    if (samples.some((sample) => sample.distance < 1200 && sample.speed > 70.8)) approach -= 5;
-    categories.push({ name: '坡前牵引与动能储备', score: Math.max(0, approach), maximum: 15 });
+    const approachSamples = samplesBetween(samples, 0, 1500);
+    const approachFastRatio = approachSamples.length
+      ? approachSamples.filter((sample) => sample.speed >= 63).length / approachSamples.length
+      : 0;
+    const earlyTraction = events.find((event) => event.type === 'traction' && event.distance < 1500 && event.value >= 3);
+    let rush = 15;
+    if (approachFastRatio < .65) rush -= 5;
+    if (approachSamples.some((sample) => sample.speed > sample.lineLimit + .5)) rush -= 5;
+    if (!earlyTraction || events.some((event) => event.type === 'traction' && event.distance < 1500 && eventJump(event, 'traction') > 2)) rush -= 5;
+    categories.push(category('坡前储能', rush, 15, '不超限、平稳加牵引，保持63—70 km/h'));
 
-    let climb = 25;
-    const climbSamples = samples.filter((sample) => between(sample.distance, 2200, 7700));
-    if (climbSamples.some((sample) => sample.speed < 35)) climb -= 10;
-    if (state.tractionThermal > 35) climb -= 8;
-    if (climbSamples.filter((sample) => sample.traction <= 1).length > 12) climb -= 7;
-    categories.push({ name: '长大上坡牵引控制', score: Math.max(0, climb), maximum: 25 });
+    const entrySamples = samplesBetween(samples, 1200, 2700);
+    let entry = 15;
+    if (!events.some((event) => event.type === 'traction' && event.distance < 2700 && event.value >= 4)) entry -= 6;
+    if (events.some((event) => event.type === 'traction' && between(event.distance, 1200, 2700) && eventJump(event, 'traction') > 2)) entry -= 5;
+    if (Math.min(state.speed, ...entrySamples.map((sample) => sample.speed)) < 52 || state.maxShockIndex > 72) entry -= 4;
+    categories.push(category('入坡稳牵引', entry, 15, '先闯后爬但不猛推，允许速度自然回落'));
+
+    const climbSamples = samplesBetween(samples, 2500, 8000);
+    const outsideClimbRatio = climbSamples.length
+      ? climbSamples.filter((sample) => !between(sample.speed, 40, 62)).length / climbSamples.length
+      : 1;
+    let climb = 20;
+    if (Math.min(state.speed, ...climbSamples.map((sample) => sample.speed)) < 38) climb -= 8;
+    if (outsideClimbRatio > .35) climb -= 6;
+    if (state.tractionThermal > 35) climb -= 6;
+    categories.push(category('持续爬坡', climb, 20, '40—62 km/h速度带内管理牵引与温升'));
 
     let adhesion = 15;
-    if (!events.some((event) => event.type === 'sand' && between(event.distance, 700, 3000))) adhesion -= 7;
-    if (state.slipDuration > 8) adhesion -= 8;
-    categories.push({ name: '撒砂与空转控制', score: Math.max(0, adhesion), maximum: 15 });
+    if (state.slipDuration > 6) adhesion -= 8;
+    const slipEvent = events.find((event) => event.type === 'wheel-slip-start');
+    if (slipEvent) {
+      const correction = events.find((event) => event.elapsed >= slipEvent.elapsed
+        && event.elapsed - slipEvent.elapsed <= 4
+        && (event.type === 'sand' || (event.type === 'traction' && event.value < event.previous.traction)));
+      if (!correction) adhesion -= 7;
+    }
+    categories.push(category('黏着处置', adhesion, 15, '不强制撒砂；出现空转后4秒内降级或撒砂'));
 
-    let crest = 20;
-    const crestReduction = events.find((event) => event.type === 'traction' && event.distance > 7200 && event.distance < 8500 && event.value <= 3);
-    if (!crestReduction) crest -= 12;
-    if (samples.some((sample) => sample.distance > 7700 && sample.speed > 70.8)) crest -= 8;
-    categories.push({ name: '坡顶预判与控速', score: Math.max(0, crest), maximum: 20 });
+    let crest = 15;
+    if (!events.some((event) => event.type === 'traction' && between(event.distance, 7600, 8600) && event.value <= 3)) crest -= 8;
+    if (samples.some((sample) => sample.distance > 8000 && sample.speed > sample.lineLimit + .5)) crest -= 7;
+    categories.push(category('坡顶预控', crest, 15, '坡顶前回牵引，防止越顶加速超限'));
 
-    let smoothness = 15;
     const tractionMoves = events.filter((event) => event.type === 'traction');
-    if (tractionMoves.length > 18) smoothness -= 5;
-    if (tractionMoves.some((event) => Math.abs(event.value - event.previous.traction) >= 5)) smoothness -= 5;
-    if (Math.max(0, ...samples.map((sample) => Math.abs(sample.acceleration))) > .75) smoothness -= 5;
-    categories.push({ name: '平稳操纵', score: Math.max(0, smoothness), maximum: 15 });
+    let smoothness = 10;
+    if (state.maxShockIndex > 72) smoothness -= 5;
+    if (tractionMoves.some((event) => eventJump(event, 'traction') > 3)) smoothness -= 3;
+    if (tractionMoves.length > 28) smoothness -= 2;
+    categories.push(category('纵向平稳', smoothness, 10, '避免大级位跳变和明显冲动'));
 
     return this.finalize(state, categories);
   }
@@ -94,52 +126,68 @@ export class SlopeDrivingAssessment {
     const samples = state.samples;
     const categories = [];
 
-    let preparation = 15;
-    if (!events.some((event) => event.type === 'lkj-open')) preparation -= 4;
-    if (!events.some((event) => event.type === 'tail-query' && event.distance < 1200)) preparation -= 7;
-    if (!events.some((event) => event.type === 'callout')) preparation -= 4;
-    categories.push({ name: '入坡检查与列尾查询', score: Math.max(0, preparation), maximum: 15 });
+    let preparation = 10;
+    if (!events.some((event) => event.type === 'lkj-open' && event.distance < 1200)) preparation -= 4;
+    if (!events.some((event) => event.type === 'tail-query' && event.distance < 1200)) preparation -= 3;
+    if (!events.some((event) => event.type === 'callout' && event.distance < 1200)) preparation -= 3;
+    categories.push(category('入坡确认', preparation, 10, 'LKJ、列尾、呼唤应答在入坡前完成'));
 
     const firstDynamic = events.find((event) => event.type === 'traction' && event.value < 0);
-    let dynamic = 20;
-    if (!firstDynamic || !between(firstDynamic.distance, 700, 2400)) dynamic -= 12;
-    if (events.some((event) => event.type === 'traction' && event.value <= -7 && Math.abs(event.value - event.previous.traction) >= 6)) dynamic -= 5;
-    if (samples.some((sample) => sample.distance > 2000 && sample.distance < 8000 && sample.speed > 68)) dynamic -= 3;
-    categories.push({ name: '动力制动建立与稳速', score: Math.max(0, dynamic), maximum: 20 });
+    let dynamic = 15;
+    if (!firstDynamic || !between(firstDynamic.distance, 400, 2200)) dynamic -= 7;
+    if (events.some((event) => event.type === 'traction' && event.distance < 2200 && eventJump(event, 'traction') > 2)) dynamic -= 4;
+    if (samplesBetween(samples, 0, 2200).some((sample) => sample.speed > 62)) dynamic -= 4;
+    categories.push(category('预置动力制动', dynamic, 15, '入坡前逐级建立动力制动，入口不超过62 km/h'));
+
+    const descentSamples = samplesBetween(samples, 2200, 8200);
+    const outsideRatio = descentSamples.length
+      ? descentSamples.filter((sample) => !between(sample.speed, 48, 60)).length / descentSamples.length
+      : 1;
+    const dynamicRatio = descentSamples.length
+      ? descentSamples.filter((sample) => sample.dynamicBrakeForce > 0).length / descentSamples.length
+      : 0;
+    let descent = 20;
+    if (outsideRatio > .18) descent -= 10;
+    if (descentSamples.some((sample) => sample.speed > 64)) descent -= 5;
+    if (dynamicRatio < .7) descent -= 5;
+    categories.push(category('长坡稳速', descent, 20, '动力制动为主，48—60 km/h稳定运行'));
 
     const applications = events.filter((event) => event.type === 'auto-brake' && event.value > 0 && event.previous?.autoBrake === 0);
-    let air = 20;
-    if (!applications.length) air = 0;
-    if (applications.some((event) => event.value < 1)) air -= 5;
-    const rapidChanges = events.filter((event, index, list) => event.type === 'auto-brake' && list.slice(0, index).reverse().find((item) => item.type === 'auto-brake' && event.elapsed - item.elapsed < 4));
-    if (rapidChanges.length) air -= 6;
-    if (events.filter((event) => event.type === 'auto-brake' && event.value > 0).length > 7) air -= 4;
-    categories.push({ name: '空气制动时机与减压', score: Math.max(0, air), maximum: 20 });
+    let air = 15;
+    if (!applications.length) air -= 8;
+    const maximumReduction = Math.max(0, ...samples.map((sample) => this.simulation.scenario.nominalPipePressure - sample.trainPipe));
+    if (maximumReduction < 45) air -= 4;
+    const autoEvents = events.filter((event) => event.type === 'auto-brake');
+    if (autoEvents.some((event, index) => index > 0 && event.elapsed - autoEvents[index - 1].elapsed < 6)) air -= 3;
+    categories.push(category('空气补充制动', air, 15, '速度上沿时一次有效减压，避免频繁小减压'));
 
     const releases = events.filter((event) => event.type === 'auto-brake' && event.value === 0 && event.previous?.autoBrake > 0);
-    let recharge = 20;
-    if (!releases.length) recharge -= 10;
-    const badRelease = releases.some((release) => release.previous?.traction >= 0);
-    if (badRelease) recharge -= 5;
-    if (!events.some((event) => event.type === 'recharge-ready' && event.distance > 2000)) recharge -= 5;
-    categories.push({ name: '缓解顺序与充分充风', score: Math.max(0, recharge), maximum: 20 });
+    let recharge = 15;
+    if (!releases.length || releases.some((event) => event.previous?.traction >= 0)) recharge -= 5;
+    if (!events.some((event) => event.type === 'recharge-ready' && event.distance > 2200)) recharge -= 6;
+    const interlockSamples = samples.filter((sample) => sample.brake > 0 && sample.traction < 0);
+    if (!interlockSamples.some((sample) => sample.locomotiveCylinder < 90 && sample.dynamicBrakeForce > 0)) recharge -= 4;
+    categories.push(category('缓解充风与联锁', recharge, 15, '保留动力制动缓解空气制动，确认充风；单缓≥90 kPa切除动力制动'));
 
-    let speedControl = 15;
-    if (samples.some((sample) => sample.speed > sample.lineLimit + .8)) speedControl = 0;
-    else if (!samples.some((sample) => sample.distance >= 8000 && sample.speed <= 55.5)) speedControl -= 8;
-    if (samples.filter((sample) => sample.distance > 2000 && sample.speed < 40).length > 20) speedControl -= 4;
-    categories.push({ name: '限速与速度带控制', score: Math.max(0, speedControl), maximum: 15 });
+    const restrictionSamples = samples.filter((sample) => sample.distance >= 8200);
+    const preRestriction = samples.filter((sample) => sample.distance < 8200).at(-1);
+    let restriction = 15;
+    if (!preRestriction || preRestriction.speed > 55) restriction -= 10;
+    if (restrictionSamples.some((sample) => sample.speed > sample.lineLimit + .5)) restriction -= 5;
+    categories.push(category('限速预控', restriction, 15, '限速点前降至55 km/h及以下，严禁压点制动'));
 
+    const autoMoves = events.filter((event) => event.type === 'auto-brake');
     let smoothness = 10;
-    if (Math.max(0, ...samples.map((sample) => Math.abs(sample.acceleration))) > .8) smoothness -= 5;
-    if (state.brakeHeat > 82) smoothness -= 5;
-    categories.push({ name: '纵向平稳与热负荷', score: Math.max(0, smoothness), maximum: 10 });
+    if (state.maxShockIndex > 72) smoothness -= 4;
+    if (state.brakeHeat > 80) smoothness -= 3;
+    if (autoMoves.length > 10) smoothness -= 3;
+    categories.push(category('纵向与热负荷', smoothness, 10, '冲动、闸瓦热负荷和制动次数受控'));
 
     return this.finalize(state, categories);
   }
 
   finalize(state, categories) {
-    let score = categories.reduce((sum, category) => sum + category.score, 0);
+    let score = categories.reduce((sum, item) => sum + item.score, 0);
     const safetyEvents = this.commonRedlines(state);
     const redline = safetyEvents.length > 0;
     if (redline) score = Math.min(score, 59);

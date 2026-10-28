@@ -101,13 +101,13 @@ export class SlopeLkjRuntime {
     } else if (this.page === 'parameters') {
       this.screen.innerHTML = this.detailPage('设定参数（本考评锁定）', [
         ['车型', 'HXD1C'], ['列车类型', scenario.trainType], ['列车质量', `${fmt(scenario.totalMassKg / 1000)} t`],
-        ['本/补', '本务'], ['线路号', '坡道教学线'], ['管压', '600 kPa'],
+        ['本/补', '本务'], ['线路号', '坡道教学线'], ['管压', `${scenario.nominalPipePressure} kPa`],
       ]);
     } else if (this.page === 'current') {
       this.screen.innerHTML = this.detailPage('当前揭示', [
         ['当前区段', s.phase.label], ['当前坡度', `${s.grade >= 0 ? '+' : ''}${fmt(s.grade, 1)}‰`],
         ['线路限速', `${s.lineLimit} km/h`], ['控制速度', `${fmt(s.lkjLimit)} km/h`],
-        ['剩余距离', `${fmt(Math.max(0, scenario.finishDistance - s.distance))} m`], ['临时限速', scenario.id === 'downhill' ? '8.0 km起 55 km/h' : '无'],
+        ['目标速度带', `${s.targetBand[0]}—${s.targetBand[1]} km/h`], ['临时限速', scenario.id === 'downhill' ? '8.2 km起 55 km/h' : '无'],
       ]);
     } else if (this.page === 'records') {
       const records = s.events.slice(-6).reverse().map((event) => `<li><span>${this.eventLabel(event.type)}</span><b>${fmt(event.elapsed)}s</b><em>${fmt(event.speed)} km/h</em></li>`).join('') || '<li>暂无记录</li>';

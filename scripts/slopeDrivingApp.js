@@ -31,6 +31,7 @@ let lastAlertLevel = 'normal';
 let cabNotice = '';
 let cabNoticeUntil = 0;
 let hornPointerId = null;
+let pendingScenarioId = 'uphill';
 const overlay = $('#cab-overlay');
 const elements = {};
 const hornAudio = new Audio('./assets/audio/HXD1C-horn.wav');
@@ -290,6 +291,23 @@ function chooseScenario(id) {
   render();
 }
 
+function openBriefing(id) {
+  const scenario = getScenario(id);
+  pendingScenarioId = scenario.id;
+  $('#briefing-title').textContent = scenario.title;
+  $('#briefing-meta').innerHTML = [
+    ['编组', scenario.consist],
+    ['列车管定压', `${scenario.nominalPipePressure} kPa`],
+    ['线路', scenario.routeLabel],
+    ['天气/黏着', scenario.weather],
+  ].map(([key, value]) => `<div><span>${key}</span><b>${value}</b></div>`).join('');
+  $('#briefing-physics').innerHTML = `<b>应当观察到的物理现象：</b>${scenario.physicalExpectation}`;
+  $('#briefing-scores').innerHTML = scenario.assessmentItems.map((item) => `<li><b>${item.label}<em>${item.points}分</em></b><span>${item.studentGoal}</span></li>`).join('');
+  $('#skill-picker').classList.remove('open');
+  $('#briefing-modal').classList.add('open');
+  $('#briefing-modal').setAttribute('aria-hidden', 'false');
+}
+
 function selectView(view) {
   selectedView = view;
   $('#cab-view').src = `./assets/archive-cabview/${views[view]}`;
@@ -340,16 +358,23 @@ function render() {
   $('#sand').classList.toggle('active', s.sandRemaining > 0);
   $('#adhesion-state').textContent = s.wheelSlip ? '空转' : s.sandRemaining > 0 ? '撒砂中' : '黏着正常';
   $('#adhesion-state').classList.toggle('danger', s.wheelSlip);
+  $('#target-speed').textContent = `${s.targetBand[0]}—${s.targetBand[1]} km/h`;
+  const trendText = s.speedTrend > .12 ? `上升 ${s.speedTrend.toFixed(2)}` : s.speedTrend < -.12 ? `下降 ${Math.abs(s.speedTrend).toFixed(2)}` : '基本稳定';
+  $('#speed-trend').textContent = trendText;
+  const shockLabel = s.shockIndex >= 72 ? '明显' : s.shockIndex >= 42 ? '可感' : '低';
+  $('#shock-state').textContent = `${shockLabel} ${s.shockIndex.toFixed(0)}`;
+  $('#shock-state').className = s.shockIndex >= 72 ? 'danger' : s.shockIndex >= 42 ? 'warning' : '';
+  const shake = Math.min(3.2, Math.max(0, s.shockIndex - 34) / 18);
+  const shakePhase = s.elapsed * 34;
+  $('#stage').style.setProperty('--shock-x', `${Math.sin(shakePhase) * shake}px`);
+  $('#stage').style.setProperty('--shock-y', `${Math.cos(shakePhase * .73) * shake * .48}px`);
   if (lkj.open) lkj.render();
   if (s.lkjLevel !== lastAlertLevel && s.lkjLevel !== 'normal') alertTone(s.lkjLevel);
   lastAlertLevel = s.lkjLevel;
 }
 
 function renderProgress(progress) {
-  const names = simulation.scenario.id === 'uphill'
-    ? ['LKJ查看', '坡道呼唤', '坡前建立牵引', '预防性撒砂', '坡顶前调整牵引', '完成考评']
-    : ['LKJ查看', '入坡前列尾查询', '坡道呼唤', '建立动力制动', '空气制动调速', '先缓解空气制动', '列车管充分充风', '限速区速度合规', '完成考评'];
-  $('#progress-list').innerHTML = names.map((name, index) => `<li class="${progress.checks[index] ? 'done' : 'pending'}">${name}</li>`).join('');
+  $('#progress-list').innerHTML = progress.items.map((item, index) => `<li class="${progress.checks[index] ? 'done' : 'pending'}"><b>${item.label}（${item.points}分）</b><span>${item.studentGoal}</span></li>`).join('');
 }
 
 function renderData(s) {
@@ -358,9 +383,11 @@ function renderData(s) {
     ['当前坡度', `${s.grade >= 0 ? '+' : ''}${s.grade.toFixed(1)}‰`], ['运行距离', `${s.distance.toFixed(0)} m`],
     ['总风缸', `${s.mainReservoir.toFixed(0)} kPa`], ['均衡风缸', `${s.equalizingReservoir.toFixed(0)} kPa`],
     ['首部列车管', `${s.trainPipe.toFixed(0)} kPa`], ['尾部列车管', `${s.tailPipe.toFixed(0)} kPa`],
-    ['制动缸', `${s.brakeCylinder.toFixed(0)} kPa`], ['充风状态', s.rechargeReady ? '充分' : '未充分'],
+    ['列车制动缸', `${s.trainBrakeCylinder.toFixed(0)} kPa`], ['机车制动缸', `${s.locomotiveCylinder.toFixed(0)} kPa`],
+    ['充风状态', s.rechargeReady ? '充分' : '未充分'], ['目标速度带', `${s.targetBand[0]}—${s.targetBand[1]} km/h`],
     ['牵引力', `${(s.tractionForce / 1000).toFixed(0)} kN`], ['电制动力', `${(s.dynamicBrakeForce / 1000).toFixed(0)} kN`],
     ['空气制动力', `${(s.airBrakeForce / 1000).toFixed(0)} kN`], ['牵引负荷', `${s.tractionCurrent.toFixed(0)}%`],
+    ['速度趋势', `${s.speedTrend >= 0 ? '+' : ''}${s.speedTrend.toFixed(2)} km/h/s`], ['纵向冲动', `${s.shockIndex.toFixed(0)} / 100`],
   ];
   $('#run-data').innerHTML = rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('');
 }
@@ -391,7 +418,7 @@ function showResult() {
   $('.result-score').classList.toggle('fail', !result.qualified);
   $('#result-title').textContent = simulation.scenario.title;
   $('#result-summary').textContent = `全程 ${(result.distance / 1000).toFixed(2)} km，最高速度 ${result.maximumSpeed.toFixed(1)} km/h，用时 ${result.duration.toFixed(0)} s。${result.redline ? '本次触发安全红线。' : ''}`;
-  $('#result-categories').innerHTML = result.categories.map((category) => `<div><span>${category.name}</span><b>${category.score}/${category.maximum}</b></div>`).join('');
+  $('#result-categories').innerHTML = result.categories.map((category) => `<div><span>${category.name}<small>${category.evidence || ''}</small></span><b>${category.score}/${category.maximum}</b></div>`).join('');
   $('#result-modal').classList.add('open');
   $('#result-modal').setAttribute('aria-hidden', 'false');
 }
@@ -430,7 +457,9 @@ function animationFrame(now) {
 }
 
 createCabControls();
-document.querySelectorAll('[data-scenario]').forEach((button) => button.addEventListener('click', () => chooseScenario(button.dataset.scenario)));
+document.querySelectorAll('[data-scenario]').forEach((button) => button.addEventListener('click', () => openBriefing(button.dataset.scenario)));
+$('#briefing-back').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
+$('#briefing-start').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); chooseScenario(pendingScenarioId); });
 $('#callout').addEventListener('click', () => simulation.command('callout'));
 $('#tail-query').addEventListener('click', () => simulation.command('tail-query'));
 $('#sand').addEventListener('click', () => simulation.command('sand'));
@@ -448,6 +477,6 @@ window.addEventListener('keydown', (event) => {
   if (event.key.toLowerCase() === 's') simulation.command('sand');
 });
 
-window.__slopeDriving = { get simulation() { return simulation; }, get assessment() { return assessment; }, chooseScenario };
+window.__slopeDriving = { get simulation() { return simulation; }, get assessment() { return assessment; }, chooseScenario, openBriefing };
 render();
 requestAnimationFrame(animationFrame);
