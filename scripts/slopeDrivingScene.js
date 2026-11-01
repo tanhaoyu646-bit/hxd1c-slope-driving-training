@@ -21,7 +21,7 @@ export class SlopeDrivingScene extends MstsRouteScene {
     this.routeGround?.geometry?.dispose?.();
     this.routeGround?.material?.dispose?.();
     if (this.routeGround) this.routeRoot.remove(this.routeGround);
-    const endDistance = Math.min(this.pathLength, 10_700);
+    const endDistance = Math.min(this.pathLength, 11_700);
     const step = 55;
     const halfWidth = 145;
     const positions = [];

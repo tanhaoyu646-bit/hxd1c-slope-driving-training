@@ -113,12 +113,14 @@ export class SlopeLkjRuntime {
   mainOverlay(state, scenario) {
     const width = 710;
     const height = 320;
-    const samples = state.samples.slice(-180);
-    const maximum = Math.max(1, ...samples.map((sample) => sample.distance));
-    const start = Math.max(0, maximum - 3000);
-    const span = Math.max(800, maximum - start);
-    const speedPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.speed / 120 * height}`).join(' ');
-    const limitPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.limit / 120 * height}`).join(' ');
+    // LKJ运行曲线按本次全程累计里程绘制。此前只显示最近180个点并重置3 km横轴，
+    // 列车前进后早期运行线被裁掉，造成“后面的线消失”的错误视觉效果。
+    const sourceSamples = state.samples.length ? state.samples : [{ distance: 0, speed: state.speed, limit: state.lkjLimit }];
+    const stride = Math.max(1, Math.ceil(sourceSamples.length / 420));
+    const samples = sourceSamples.filter((_, index) => index % stride === 0 || index === sourceSamples.length - 1);
+    const span = Math.max(1, scenario.finishDistance);
+    const speedPoints = samples.map((sample) => `${Math.max(0, Math.min(width, sample.distance / span * width))},${height - sample.speed / 120 * height}`).join(' ');
+    const limitPoints = samples.map((sample) => `${Math.max(0, Math.min(width, sample.distance / span * width))},${height - sample.limit / 120 * height}`).join(' ');
     // 未绑定实际线路公里标时显示场景累计里程，不伪造线路公里标。
     const routeBaseKm = Number(scenario.routeBaseKm) || 0;
     const boundaryMarkers = scenario.profile.slice(1).map((phase) => phase.start);

@@ -89,8 +89,8 @@ export const SCENARIOS = Object.freeze({
     adhesionZones: [{ start: 3300, end: 3900, coefficient: .255, label: '林荫湿轨低黏着区' }],
     initialSpeed: 67,
     initialTraction: 0,
-    // 使用原线路已导出完整地形和沿线模型的两站一区间。
-    startOffset: 0,
+    // 与“途中过分相”项目使用同一中途山区线路选段，避开车站场景。
+    startOffset: 1_250,
     finishDistance: 9800,
     lineLimit: 70,
     targetBand: [40, 68],
@@ -120,7 +120,7 @@ export const SCENARIOS = Object.freeze({
     adhesionZones: [],
     initialSpeed: 58,
     initialTraction: 0,
-    startOffset: 0,
+    startOffset: 1_250,
     finishDistance: 10200,
     lineLimit: 70,
     targetBand: [45, 60],

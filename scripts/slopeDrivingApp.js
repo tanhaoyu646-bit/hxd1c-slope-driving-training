@@ -565,7 +565,7 @@ function showResult() {
   $('#result-score').textContent = result.score;
   $('#result-grade').textContent = result.summary;
   $('.result-score').classList.toggle('fail', !result.qualified);
-  $('#result-title').textContent = simulation.scenario.title;
+  $('#result-title').textContent = `${simulation.scenario.title}考评成绩单`;
   const identity = candidateAttempt || simulation.state.candidateAttempt || {};
   $('#result-name').textContent = identity.name || '—';
   $('#result-student-id').textContent = identity.studentId || '—';
@@ -592,11 +592,22 @@ function alertTone(level) {
 }
 
 function togglePanel(panel) {
+  let opened = false;
   document.querySelectorAll('.side-panel').forEach((item) => {
     const open = item === panel && !item.classList.contains('open');
     item.classList.toggle('open', open);
     item.setAttribute('aria-hidden', String(!open));
+    opened ||= open;
   });
+  $('#panel-backdrop').hidden = !opened;
+}
+
+function closePanels() {
+  document.querySelectorAll('.side-panel').forEach((item) => {
+    item.classList.remove('open');
+    item.setAttribute('aria-hidden', 'true');
+  });
+  $('#panel-backdrop').hidden = true;
 }
 
 function updateViewportVariables() {
@@ -679,13 +690,15 @@ $('#shock-stick').addEventListener('click', () => simulation.command('shock-rese
 $('#progress-toggle').addEventListener('click', () => togglePanel($('#progress-panel')));
 $('#data-toggle').addEventListener('click', () => togglePanel($('#data-panel')));
 document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => { selectView(button.dataset.view); $('#view-menu').classList.remove('open'); }));
-document.querySelectorAll('[data-close-panel]').forEach((button) => button.addEventListener('click', () => togglePanel(button.closest('.side-panel'))));
+document.querySelectorAll('[data-close-panel]').forEach((button) => button.addEventListener('click', closePanels));
+$('#panel-backdrop').addEventListener('click', closePanels);
 $('#fullscreen').addEventListener('click', () => document.fullscreenElement || document.documentElement.classList.contains('immersive') ? exitImmersive() : enterImmersive());
+$('#result-close').addEventListener('click', () => { $('#result-modal').classList.remove('open'); $('#result-modal').setAttribute('aria-hidden', 'true'); });
 $('#retry').addEventListener('click', () => chooseScenario(simulation.state.scenarioId));
 $('#choose-skill').addEventListener('click', () => { $('#result-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 $('#change-candidate').addEventListener('click', () => { clearCandidateDraft(); location.reload(); });
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu')?.classList.remove('open'); lkj.close(); cir.close(); }
+  if (event.key === 'Escape') { closePanels(); $('#view-menu')?.classList.remove('open'); lkj.close(); cir.close(); }
   if (event.key.toLowerCase() === 's') simulation.command('sand');
 });
 

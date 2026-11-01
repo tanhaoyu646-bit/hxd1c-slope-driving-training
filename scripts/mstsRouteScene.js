@@ -48,7 +48,7 @@ export class MstsRouteScene {
     this.isPowerTraining = this.profile === 'power-training';
     this.isCorridor = this.isLookout || this.isPowerTraining;
     // 坡道项目覆盖约10 km，不能沿用途中瞭望项目6 km的环境裁剪范围。
-    this.corridorDistanceLimit = this.isPowerTraining ? 10_700 : LOOKOUT_TRAINING_CONFIG.finishDistance + 500;
+    this.corridorDistanceLimit = this.isPowerTraining ? 11_700 : LOOKOUT_TRAINING_CONFIG.finishDistance + 500;
     this.renderOptions = this.isCorridor ? LOOKOUT_ROUTE_RENDER_OPTIONS : DEFAULT_ROUTE_RENDER_OPTIONS;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     const coarse = matchMedia('(pointer: coarse)').matches;

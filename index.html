@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#06131d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23061925'/%3E%3Cpath d='M8 43L25 25l11 10 20-22M10 48h44' stroke='%2358d7ff' stroke-width='5' fill='none'/%3E%3C/svg%3E">
   <title>HXD1C 坡道驾驶与调速实操考评</title>
-  <link rel="stylesheet" href="./styles/slope-driving.css?rev=slope-v2-1">
+  <link rel="stylesheet" href="./styles/slope-driving.css?rev=slope-v2-2">
 </head>
 <body class="candidate-entry-active">
   <section id="candidate-gate" class="candidate-gate" role="dialog" aria-modal="true" aria-labelledby="candidate-title">
@@ -50,6 +50,7 @@
         <div class="panel-head"><strong>运行数据</strong><button data-close-panel>×</button></div>
         <dl id="run-data"></dl>
       </aside>
+      <button type="button" id="panel-backdrop" class="panel-backdrop" aria-label="收回考评面板" hidden></button>
 
       <section class="slope-hud" aria-label="线路纵断面">
         <div class="slope-hud-head"><b>线路纵断面</b><span id="adhesion-state">黏着正常</span></div>
@@ -57,13 +58,13 @@
         <div id="slope-profile"></div>
       </section>
 
-      <button type="button" id="shock-stick" class="shock-stick" aria-label="扶正冲动棒">
+      <button type="button" id="shock-stick" class="shock-stick" aria-label="扶正冲动检测仪">
         <span class="shock-rack" aria-hidden="true">
           <i class="rack-back"></i>
           <b></b><b></b><b></b><b></b><b></b><b></b>
           <i class="rack-slots"></i><i class="rack-front"></i>
         </span>
-        <em>冲动棒</em>
+        <em>冲动检测仪</em>
       </button>
 
       <div id="status-strip" class="status-strip" aria-live="polite">
@@ -108,17 +109,18 @@
       </section>
 
       <section id="result-modal" class="modal" aria-hidden="true">
-        <div class="result-card">
-          <span class="eyebrow">考评结束</span>
-          <h2 id="result-title">考评结果</h2>
-          <div class="result-candidate">
-            <span>姓名<b id="result-name">—</b></span><span>学号<b id="result-student-id">—</b></span>
-            <span>开始时间<b id="result-started-at">—</b></span><span>结束时间<b id="result-finished-at">—</b></span>
+        <div class="result-card result-shell" role="dialog" aria-modal="true" aria-label="考评成绩单">
+          <header class="result-head"><div><strong id="result-title">坡道驾驶与调速考评成绩单</strong><span>课堂训练结果，不作为实际作业记录</span></div><button type="button" id="result-close" aria-label="关闭成绩单">×</button></header>
+          <div class="result-body">
+            <div class="result-candidate">
+              <span>姓名<b id="result-name">—</b></span><span>学号<b id="result-student-id">—</b></span>
+              <span>开始时间<b id="result-started-at">—</b></span><span>结束时间<b id="result-finished-at">—</b></span>
+            </div>
+            <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
+            <p id="result-summary"></p>
+            <div id="result-categories" class="result-categories"></div>
+            <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button><button type="button" id="change-candidate" class="change-candidate">更换学员</button></div>
           </div>
-          <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
-          <p id="result-summary"></p>
-          <div id="result-categories" class="result-categories"></div>
-          <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button><button type="button" id="change-candidate" class="change-candidate">更换学员</button></div>
         </div>
       </section>
     </section>
@@ -126,6 +128,6 @@
   <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog" inert>
     <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
   </section>
-  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2-1"></script>
+  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2-2"></script>
 </body>
 </html>

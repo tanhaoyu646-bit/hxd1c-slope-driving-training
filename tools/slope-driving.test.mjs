@@ -12,6 +12,7 @@ import {
 } from '../scripts/slopeDrivingConfig.js';
 import { SlopeDrivingSimulation } from '../scripts/slopeDrivingSimulation.js';
 import { SlopeDrivingAssessment } from '../scripts/slopeDrivingAssessment.js';
+import { SlopeLkjRuntime } from '../scripts/slopeLkjRuntime.js';
 import {
   createCandidateAttempt,
   normalizeCandidate,
@@ -81,8 +82,8 @@ test('项目包含独立上坡和下坡配置以及真实坡度区段', () => {
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8200), 55);
   assert.equal(SCENARIOS.uphill.nominalPipePressure, 600);
   assert.equal(SCENARIOS.downhill.nominalPipePressure, 600);
-  assert.equal(SCENARIOS.uphill.startOffset, 0);
-  assert.equal(SCENARIOS.downhill.startOffset, 0);
+  assert.equal(SCENARIOS.uphill.startOffset, 1_250);
+  assert.equal(SCENARIOS.downhill.startOffset, 1_250);
   assert.equal(SCENARIOS.uphill.assessmentItems.length, 7);
   assert.equal(SCENARIOS.downhill.assessmentItems.reduce((sum, item) => sum + item.points, 0), 100);
 });
@@ -224,7 +225,7 @@ test('忽略坡道限速会触发LKJ安全红线', () => {
   assert.equal(result.qualified, false);
 });
 
-test('呼唤与撒砂不能连续刷事件，冲动棒扶正不清除历史扣分', () => {
+test('呼唤与撒砂不能连续刷事件，冲动检测仪扶正不清除历史扣分', () => {
   const simulation = new SlopeDrivingSimulation('uphill');
   assert.equal(simulation.command('callout'), true);
   assert.equal(simulation.command('callout'), false);
@@ -256,13 +257,52 @@ test('简化手机入口并只保留驾驶台实体手柄操作', () => {
   assert.doesNotMatch(html, /id="mobile-controls"/);
   assert.doesNotMatch(html, /briefing-physics|notch-reference|briefing-scores/);
   assert.match(html, /class="shock-rack"/);
+  assert.match(html, />冲动检测仪</);
+  assert.doesNotMatch(html, /冲动棒/);
 });
 
-test('LKJ在左上角打开，限速线为红色且运行线为绿色', () => {
+test('LKJ在左上角打开，限速线为红色、运行线为绿色且历史轨迹不消失', () => {
   const css = readFileSync(new URL('../styles/slope-driving.css', import.meta.url), 'utf8');
   const lkj = readFileSync(new URL('../scripts/slopeLkjRuntime.js', import.meta.url), 'utf8');
   assert.match(css, /body\.mobile-controls-enabled \.lkj-dock\{top:max\(5px/);
   assert.match(css, /native-chart \.limit\{stroke:#ff3247/);
   assert.match(css, /native-chart \.speed\{stroke:#24ee67/);
   assert.match(lkj, /native-route-profile/);
+  assert.doesNotMatch(lkj, /slice\(-180\)/);
+  const overlay = SlopeLkjRuntime.prototype.mainOverlay({
+    speed: 55,
+    lkjLimit: 70,
+    samples: [
+      { distance: 100, speed: 50, limit: 70 },
+      { distance: 4_000, speed: 55, limit: 70 },
+      { distance: 8_000, speed: 48, limit: 55 },
+    ],
+    lkjLevel: 'normal',
+    distance: 8_000,
+    phase: { label: '长坡' },
+    grade: -13,
+    tailPipe: 598,
+  }, {
+    finishDistance: 10_000,
+    profile: [{ start: 0, end: 10_000, gradeStart: -13, gradeEnd: -13 }],
+  });
+  assert.match(overlay, /class="speed" points="7\.1000000000000005,186\.66666666666666 284,173\.33333333333334 568,192"/);
+});
+
+test('考评抽屉支持点击框外收起，手机端保留三类手柄位置显示', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../scripts/slopeDrivingApp.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles/slope-driving.css', import.meta.url), 'utf8');
+  assert.match(html, /id="panel-backdrop"/);
+  assert.match(app, /panel-backdrop.*addEventListener\('click', closePanels\)/s);
+  assert.match(css, /body\.mobile-controls-enabled \.control-position-badge\{display:block/);
+  assert.doesNotMatch(css, /body\.mobile-controls-enabled \.control-position-badge\{display:none/);
+});
+
+test('成绩单沿用过分相项目的标题栏、主体和关闭结构', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /class="result-card result-shell"/);
+  assert.match(html, /class="result-head"/);
+  assert.match(html, /class="result-body"/);
+  assert.match(html, /id="result-close"/);
 });
