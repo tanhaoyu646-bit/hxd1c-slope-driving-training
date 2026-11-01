@@ -11,6 +11,11 @@ import {
 } from '../scripts/slopeDrivingConfig.js';
 import { SlopeDrivingSimulation } from '../scripts/slopeDrivingSimulation.js';
 import { SlopeDrivingAssessment } from '../scripts/slopeDrivingAssessment.js';
+import {
+  createCandidateAttempt,
+  normalizeCandidate,
+  validateCandidate,
+} from '../scripts/slopeDrivingCandidate.js';
 
 function runUntilComplete(simulation, driver, maximumSteps = 24_000) {
   simulation.start();
@@ -75,6 +80,16 @@ test('项目包含独立上坡和下坡配置以及真实坡度区段', () => {
   assert.equal(SCENARIOS.downhill.nominalPipePressure, 500);
   assert.equal(SCENARIOS.uphill.assessmentItems.length, 7);
   assert.equal(SCENARIOS.downhill.assessmentItems.reduce((sum, item) => sum + item.points, 0), 100);
+});
+
+test('登录登记沿用过分相项目的姓名学号校验并生成独立考核记录', () => {
+  assert.deepEqual(normalizeCandidate({ name: '  张  三  ', studentId: ' 2026-001 ' }), { name: '张 三', studentId: '2026-001' });
+  assert.equal(validateCandidate({ name: '张三', studentId: '20260001' }).valid, true);
+  assert.equal(validateCandidate({ name: '<script>', studentId: '1' }).valid, false);
+  const attempt = createCandidateAttempt({ name: '李四', studentId: 'ABCD-1234' }, new Date('2026-10-26T00:00:00.000Z'));
+  assert.equal(attempt.name, '李四');
+  assert.equal(attempt.studentId, 'ABCD-1234');
+  assert.equal(attempt.startedAt, '2026-10-26T00:00:00.000Z');
 });
 
 test('驾驶台手柄贴图、位置名称和运行联锁与仿真状态对应', () => {

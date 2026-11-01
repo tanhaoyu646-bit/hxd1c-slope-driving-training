@@ -14,6 +14,14 @@ import { SlopeDrivingAssessment } from './slopeDrivingAssessment.js';
 import { SlopeDrivingScene } from './slopeDrivingScene.js';
 import { SlopeLkjRuntime } from './slopeLkjRuntime.js';
 import { SlopeCirRuntime } from './slopeCirRuntime.js';
+import {
+  clearCandidateDraft,
+  createCandidateAttempt,
+  formatAttemptTime,
+  loadCandidateDraft,
+  saveCandidateDraft,
+  validateCandidate,
+} from './slopeDrivingCandidate.js';
 
 const $ = (selector) => document.querySelector(selector);
 const pct = (value, total) => `${value / total * 100}%`;
@@ -22,9 +30,13 @@ const views = { front: 'HXD1C_front.png', left: 'HXD1C_left_full.png', right: 'H
 
 let simulation = new SlopeDrivingSimulation('uphill');
 let assessment = new SlopeDrivingAssessment(simulation);
-let routeScene = null;
+let routeScene = new SlopeDrivingScene($('#route-scene'), getScenario('uphill'));
 let lkj = new SlopeLkjRuntime($('#lkj-dock'), simulation);
 let cir = new SlopeCirRuntime($('#cir-dock'), simulation);
+let candidateAttempt = null;
+let candidateRouteReady = false;
+let candidateCabReady = false;
+let candidateLoadFailed = false;
 let selectedView = 'front';
 let lastFrame = performance.now();
 let resultShown = false;
@@ -42,6 +54,87 @@ const elements = {};
 const hornAudio = new Audio('./assets/audio/HXD1C-horn.wav');
 hornAudio.preload = 'auto';
 hornAudio.loop = true;
+
+function setCandidateLoadProgress(percent, stage) {
+  const bounded = clamp(Math.round(Number(percent) || 0), 0, 100);
+  const progress = $('#candidate-load-progress');
+  if (progress) { progress.value = bounded; progress.textContent = `${bounded}%`; }
+  $('#candidate-load-value').textContent = `${bounded}%`;
+  if (stage) $('#candidate-load-stage').textContent = stage;
+}
+
+function updateCandidateGate() {
+  const name = $('#candidate-name');
+  const studentId = $('#candidate-student-id');
+  const validation = validateCandidate({ name: name?.value, studentId: studentId?.value });
+  name?.setAttribute('aria-invalid', String(Boolean(name?.value) && validation.field === 'name'));
+  studentId?.setAttribute('aria-invalid', String(Boolean(studentId?.value) && validation.field === 'studentId'));
+  if (!candidateLoadFailed) $('#candidate-error').textContent = (name?.value || studentId?.value) && !validation.valid ? validation.message : '';
+  const ready = candidateRouteReady && candidateCabReady && !candidateLoadFailed;
+  const submit = $('#candidate-submit');
+  submit.disabled = !ready || !validation.valid;
+  submit.textContent = candidateLoadFailed ? '资源加载失败' : !ready ? '资源加载中' : validation.valid ? '进入考核' : '请填写姓名和学号';
+}
+
+function setupCandidateGate() {
+  const form = $('#candidate-form');
+  const name = $('#candidate-name');
+  const studentId = $('#candidate-student-id');
+  const cab = $('#cab-view');
+  const draft = loadCandidateDraft();
+  name.value = draft.name;
+  studentId.value = draft.studentId;
+  setCandidateLoadProgress(8, '正在准备两站一区间线路');
+  routeScene.loadPromise.then(() => {
+    candidateRouteReady = true;
+    setCandidateLoadProgress(candidateCabReady ? 100 : 92, candidateCabReady ? '考核环境准备完成' : '线路已完成，正在准备驾驶台');
+    updateCandidateGate();
+  }).catch((error) => {
+    candidateLoadFailed = true;
+    setCandidateLoadProgress(0, '考核环境加载失败');
+    $('#candidate-error').textContent = error?.message || '线路资源加载失败，请刷新页面重试。';
+    updateCandidateGate();
+  });
+  const cabReady = typeof cab.decode === 'function' ? cab.decode() : new Promise((resolve, reject) => {
+    if (cab.complete && cab.naturalWidth) resolve();
+    else {
+      cab.addEventListener('load', resolve, { once: true });
+      cab.addEventListener('error', reject, { once: true });
+    }
+  });
+  cabReady.then(() => {
+    candidateCabReady = true;
+    setCandidateLoadProgress(candidateRouteReady ? 100 : 38, candidateRouteReady ? '考核环境准备完成' : '驾驶台已完成，正在准备线路');
+    updateCandidateGate();
+  }).catch(() => {
+    candidateLoadFailed = true;
+    setCandidateLoadProgress(0, '驾驶台加载失败');
+    $('#candidate-error').textContent = '驾驶台图片加载失败，请刷新页面重试。';
+    updateCandidateGate();
+  });
+  [name, studentId].forEach((input) => input.addEventListener('input', updateCandidateGate));
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!candidateRouteReady || !candidateCabReady || candidateLoadFailed) return;
+    const validation = validateCandidate({ name: name.value, studentId: studentId.value });
+    if (!validation.valid) {
+      (validation.field === 'name' ? name : studentId).focus();
+      $('#candidate-error').textContent = validation.message;
+      updateCandidateGate();
+      return;
+    }
+    saveCandidateDraft(validation.candidate);
+    candidateAttempt = createCandidateAttempt(validation.candidate);
+    simulation.state.candidateAttempt = candidateAttempt;
+    $('#candidate-gate').hidden = true;
+    document.body.classList.remove('candidate-entry-active');
+    $('.training-app').inert = false;
+    $('#landscape-gate').inert = false;
+    updateMobileMode();
+    routeScene.resize();
+  });
+  updateCandidateGate();
+}
 
 function makeSprite(id, image, x, y, width, height, columns, rows, label) {
   const element = document.createElement('div');
@@ -283,18 +376,24 @@ window.addEventListener('pagehide', () => { stopHorn(); stopSideRelease(); });
 function chooseScenario(id) {
   const scenario = getScenario(id);
   simulation = new SlopeDrivingSimulation(scenario.id);
+  simulation.state.candidateAttempt = candidateAttempt;
   assessment = new SlopeDrivingAssessment(simulation);
   lkj.simulation = simulation;
   cir.setSimulation(simulation);
   lkj.page = 'main';
   lkj.menuIndex = 0;
-  routeScene?.resizeObserver?.disconnect();
-  routeScene?.renderer?.dispose();
-  const oldCanvas = $('#route-scene');
-  const newCanvas = oldCanvas.cloneNode(false);
-  oldCanvas.replaceWith(newCanvas);
-  routeScene = new SlopeDrivingScene(newCanvas, scenario);
-  routeScene.loadPromise.catch((error) => { $('#status-message').textContent = `线路加载失败：${error.message}`; });
+  if (routeScene?.ready) {
+    routeScene.setScenario(scenario);
+    routeScene.resize();
+  } else {
+    routeScene?.resizeObserver?.disconnect();
+    routeScene?.renderer?.dispose();
+    const oldCanvas = $('#route-scene');
+    const newCanvas = oldCanvas.cloneNode(false);
+    oldCanvas.replaceWith(newCanvas);
+    routeScene = new SlopeDrivingScene(newCanvas, scenario);
+    routeScene.loadPromise.catch((error) => { $('#status-message').textContent = `线路加载失败：${error.message}`; });
+  }
   simulation.addEventListener('change', render);
   simulation.addEventListener('complete', showResult);
   localStorage.setItem(`${PROJECT_ID}:last-scenario`, scenario.id);
@@ -447,6 +546,11 @@ function showResult() {
   $('#result-grade').textContent = result.summary;
   $('.result-score').classList.toggle('fail', !result.qualified);
   $('#result-title').textContent = simulation.scenario.title;
+  const identity = candidateAttempt || simulation.state.candidateAttempt || {};
+  $('#result-name').textContent = identity.name || '—';
+  $('#result-student-id').textContent = identity.studentId || '—';
+  $('#result-started-at').textContent = formatAttemptTime(identity.startedAt);
+  $('#result-finished-at').textContent = formatAttemptTime(new Date());
   $('#result-summary').textContent = `全程 ${(result.distance / 1000).toFixed(2)} km，最高速度 ${result.maximumSpeed.toFixed(1)} km/h，用时 ${result.duration.toFixed(0)} s。${result.redline ? '本次触发安全红线。' : ''}`;
   $('#result-categories').innerHTML = result.categories.map((category) => `<div><span>${category.name}<small>${category.evidence || ''}</small></span><b>${category.score}/${category.maximum}</b></div>`).join('');
   $('#result-modal').classList.add('open');
@@ -529,6 +633,7 @@ function animationFrame(now) {
 
 createCabControls();
 setupMobileControls();
+setupCandidateGate();
 document.querySelectorAll('[data-scenario]').forEach((button) => button.addEventListener('click', () => openBriefing(button.dataset.scenario)));
 $('#briefing-back').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 $('#briefing-start').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); chooseScenario(pendingScenarioId); });
@@ -544,6 +649,7 @@ document.querySelectorAll('[data-close-panel]').forEach((button) => button.addEv
 $('#fullscreen').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : $('#stage').requestFullscreen());
 $('#retry').addEventListener('click', () => chooseScenario(simulation.state.scenarioId));
 $('#choose-skill').addEventListener('click', () => { $('#result-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
+$('#change-candidate').addEventListener('click', () => { clearCandidateDraft(); location.reload(); });
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu').classList.remove('open'); lkj.close(); cir.close(); }
   if (event.key.toLowerCase() === 's') simulation.command('sand');

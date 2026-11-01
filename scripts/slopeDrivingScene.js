@@ -16,6 +16,28 @@ export class SlopeDrivingScene extends MstsRouteScene {
     this.applyCamera();
   }
 
+  setScenario(scenario) {
+    for (const { root } of this.slopeBoards) {
+      this.routeRoot.remove(root);
+      root.traverse((object) => {
+        object.geometry?.dispose?.();
+        if (Array.isArray(object.material)) object.material.forEach((material) => {
+          material.map?.dispose?.();
+          material.dispose?.();
+        });
+        else {
+          object.material?.map?.dispose?.();
+          object.material?.dispose?.();
+        }
+      });
+    }
+    this.slopeBoards = [];
+    this.slopeScenario = scenario;
+    this.startOffset = scenario.startOffset;
+    if (this.ready) this.buildSlopeBoards();
+    this.applyCamera();
+  }
+
   buildSlopeBoards() {
     for (const config of this.slopeScenario.markers) {
       const root = new THREE.Group();

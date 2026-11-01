@@ -8,8 +8,27 @@
   <title>HXD1C 坡道驾驶与调速实操考评</title>
   <link rel="stylesheet" href="./styles/slope-driving.css">
 </head>
-<body>
-  <main class="training-app" aria-label="HXD1C坡道驾驶与调速实操考评">
+<body class="candidate-entry-active">
+  <section id="candidate-gate" class="candidate-gate" role="dialog" aria-modal="true" aria-labelledby="candidate-title">
+    <form id="candidate-form" class="candidate-card" novalidate>
+      <div class="candidate-eyebrow">HXD1C · 独立课堂考核</div>
+      <h1 id="candidate-title">坡道驾驶与调速考评</h1>
+      <p class="candidate-intro">请先登记考生信息。线路、驾驶台和考核资源正在后台准备，资源完成后方可进入项目选择。</p>
+      <div class="candidate-fields">
+        <label><span>姓名</span><input id="candidate-name" name="candidateName" type="text" maxlength="20" autocomplete="name" enterkeyhint="next" placeholder="请输入姓名"></label>
+        <label><span>学号</span><input id="candidate-student-id" name="candidateStudentId" type="text" maxlength="20" autocomplete="off" inputmode="text" enterkeyhint="done" placeholder="请输入学号"></label>
+      </div>
+      <p id="candidate-error" class="candidate-error" aria-live="polite"></p>
+      <div class="candidate-load" aria-live="polite">
+        <div><span id="candidate-load-stage">正在初始化考核环境</span><b id="candidate-load-value">5%</b></div>
+        <progress id="candidate-load-progress" max="100" value="5">5%</progress>
+      </div>
+      <button id="candidate-submit" class="candidate-submit" type="submit" disabled>资源加载中</button>
+      <small>信息仅保存在当前浏览器标签页，不会上传到服务器；重新开始或切换坡道项目时保留当前考生信息。</small>
+    </form>
+  </section>
+
+  <main class="training-app" aria-label="HXD1C坡道驾驶与调速实操考评" inert>
     <section class="stage" id="stage">
       <canvas id="route-scene" aria-label="列车运行线路"></canvas>
       <img id="cab-view" class="cab-view" src="./assets/archive-cabview/HXD1C_front.png" alt="HXD1C司机室">
@@ -120,15 +139,19 @@
         <div class="result-card">
           <span class="eyebrow">考评结束</span>
           <h2 id="result-title">考评结果</h2>
+          <div class="result-candidate">
+            <span>姓名<b id="result-name">—</b></span><span>学号<b id="result-student-id">—</b></span>
+            <span>开始时间<b id="result-started-at">—</b></span><span>结束时间<b id="result-finished-at">—</b></span>
+          </div>
           <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
           <p id="result-summary"></p>
           <div id="result-categories" class="result-categories"></div>
-          <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button></div>
+          <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button><button type="button" id="change-candidate" class="change-candidate">更换学员</button></div>
         </div>
       </section>
     </section>
   </main>
-  <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog">
+  <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog" inert>
     <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
   </section>
   <script type="module" src="./scripts/slopeDrivingApp.js"></script>
