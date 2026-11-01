@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   AUTO_BRAKE_SPRITE_FRAMES,
   BRAKE_POSITIONS,
@@ -65,8 +66,9 @@ function runDownhill() {
               : s.distance < 8200 ? -8
                 : s.distance < 9400 ? -6 : -4;
     if (nextTraction !== targetTraction) { sim.command('traction', nextTraction); targetTraction = nextTraction; }
-    if (brakePhase === 0 && s.distance > 2250) { sim.command('auto-brake', 1); brakePhase = 1; }
-    else if (brakePhase === 1 && s.distance > 7600 && s.speed < 51.8) { sim.command('auto-brake', 0); brakePhase = 2; }
+    if (brakePhase === 0 && s.distance > 2600 && s.traction <= -8 && s.speed >= 58 && s.speedTrend > .04) { sim.command('auto-brake', 1); brakePhase = 1; }
+    else if (brakePhase === 1 && s.distance > 7000 && s.speed > 56) { sim.command('auto-brake', 2); brakePhase = 2; }
+    else if (brakePhase === 2 && s.speed <= 54.5) { sim.command('auto-brake', 0); brakePhase = 3; }
   });
 }
 
@@ -122,24 +124,26 @@ test('驾驶台手柄贴图、位置名称和运行联锁与仿真状态对应',
   assert.equal(simulation.state.hornCount, 1);
 });
 
-test('CIR列尾查询不能绕过连接流程，考评进度必须按顺序解锁', () => {
+test('坡道任务默认继承列尾连接，七项考评独立监测不相互锁定', () => {
   const simulation = new SlopeDrivingSimulation('uphill');
-  simulation.command('tail-query');
-  assert.equal(simulation.state.tailQueryCount, 0);
-  assert.ok(simulation.state.events.some((event) => event.type === 'tail-query-rejected'));
-  simulation.command('tail-link', '123456');
   simulation.command('tail-query');
   assert.equal(simulation.state.tailQueryCount, 1);
   simulation.state.distance = 9_000;
   simulation.state.events.push({ type: 'traction', distance: 8_000, value: 2, previous: { traction: 4 } });
   const progress = new SlopeDrivingAssessment(simulation).progress();
-  assert.equal(progress.statuses[0], 'active');
-  assert.ok(progress.statuses.slice(1).every((status) => status === 'locked'));
+  assert.equal(progress.statuses[0], 'settled');
+  assert.ok(progress.statuses.every((status) => status !== 'locked'));
 });
 
-test('牵引级位按教学目标速度工作，6级对应60 km/h并保留坡度影响', () => {
+test('牵引区扩展到12级，6级对应60 km/h且物理牵引上限不被放大', () => {
   assert.equal(tractionTargetSpeed(6), 60);
   assert.equal(tractionTargetSpeed(7), 70);
+  assert.equal(tractionTargetSpeed(12), 120);
+  const maximum = new SlopeDrivingSimulation('uphill');
+  maximum.command('traction', 12);
+  assert.equal(maximum.state.traction, 12);
+  for (let index = 0; index < 100; index += 1) maximum.tick(.05);
+  assert.ok(maximum.state.tractionForce <= 520_000);
   const level = new SlopeDrivingSimulation('uphill');
   level.state.speed = 45;
   level.command('traction', 6);
@@ -215,4 +219,29 @@ test('忽略坡道限速会触发LKJ安全红线', () => {
   assert.ok(simulation.state.events.some((event) => event.type === 'lkj-level' && ['service', 'emergency'].includes(event.to)));
   assert.equal(result.redline, true);
   assert.equal(result.qualified, false);
+});
+
+test('呼唤与撒砂不能连续刷事件，冲动棒扶正不清除历史扣分', () => {
+  const simulation = new SlopeDrivingSimulation('uphill');
+  assert.equal(simulation.command('callout'), true);
+  assert.equal(simulation.command('callout'), false);
+  assert.equal(simulation.state.calloutCount, 1);
+  assert.equal(simulation.command('sand'), true);
+  assert.equal(simulation.command('sand'), false);
+  assert.equal(simulation.state.sandingCount, 1);
+  simulation.command('traction', 12);
+  for (let index = 0; index < 20; index += 1) simulation.tick(.05);
+  const retained = simulation.state.maxShockIndex;
+  simulation.command('shock-reset');
+  assert.equal(simulation.state.shockStickTilt, 0);
+  assert.equal(simulation.state.maxShockIndex, retained);
+});
+
+test('手机登录提交直接调用沉浸全屏流程并保留CSS兜底', () => {
+  const app = readFileSync(new URL('../scripts/slopeDrivingApp.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles/slope-driving.css', import.meta.url), 'utf8');
+  assert.match(app, /if \(isMobileLike\(\)\) await enterImmersive\(\)/);
+  assert.match(app, /screen\.orientation\?\.lock\?\.\('landscape'\)/);
+  assert.match(app, /visualViewport/);
+  assert.match(css, /html\.immersive/);
 });

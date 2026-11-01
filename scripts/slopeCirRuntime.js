@@ -72,6 +72,7 @@ export class SlopeCirRuntime {
     }
     if (Array.isArray(target.mmiinfo)) {
       target.mmiinfo[0] = '46125';
+      target.mmiinfo[1] = 'L' + (this.simulation.state.tailDeviceId || '100001');
       target.mmiinfo[2] = 'H0172';
       target.mmiinfo[3] = String(Math.round(this.simulation.state.tailPipe)).padStart(4, '0');
     }
@@ -145,10 +146,10 @@ export class SlopeCirRuntime {
     this.workflow.innerHTML = `
       <h3>坡道任务所需CIR功能</h3>
       <ol>
-        <li class="${connected ? 'done' : 'active'}"><b>1　连接列尾装置</b><span>主控菜单第6项输入6位列尾ID并确认。</span></li>
-        <li class="${queried ? 'done' : connected ? 'active' : 'locked'}"><b>2　查询列尾风压</b><span>返回主界面，按“列尾风压”键，核对返回压力。</span></li>
+        <li class="done"><b>列尾装置已连接</b><span>坡道途中任务默认继承发车前已经建立的列尾连接。</span></li>
+        <li class="${queried ? 'done' : 'active'}"><b>查询列尾风压</b><span>在CIR主界面按“列尾风压”键，核对返回压力。</span></li>
       </ol>
       <dl><div><dt>车次</dt><dd>46125</dd></div><div><dt>机车</dt><dd>H0172</dd></div><div><dt>尾部列车管</dt><dd>${state.tailPipe.toFixed(0)} kPa</dd></div></dl>
-      <p>${this.notice || '评分只记录从CIR完成的列尾风压查询，顶部按钮不再绕过设备流程。'}</p>`;
+      <p>${this.notice || '本任务只考核列尾风压查询，不重复考核列尾连接。'}</p>`;
   }
 }

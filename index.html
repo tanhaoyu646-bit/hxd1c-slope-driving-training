@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#06131d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23061925'/%3E%3Cpath d='M8 43L25 25l11 10 20-22M10 48h44' stroke='%2358d7ff' stroke-width='5' fill='none'/%3E%3C/svg%3E">
   <title>HXD1C 坡道驾驶与调速实操考评</title>
-  <link rel="stylesheet" href="./styles/slope-driving.css">
+  <link rel="stylesheet" href="./styles/slope-driving.css?rev=slope-v2">
 </head>
 <body class="candidate-entry-active">
   <section id="candidate-gate" class="candidate-gate" role="dialog" aria-modal="true" aria-labelledby="candidate-title">
@@ -36,35 +36,16 @@
 
       <header class="toolbar">
         <button type="button" id="callout" class="toolbar-button callout">呼唤确认</button>
-        <button type="button" id="tail-query" class="toolbar-button">CIR</button>
         <button type="button" id="sand" class="toolbar-button action-button">撒砂</button>
         <button type="button" id="progress-toggle" class="toolbar-button">考评进度 <b id="progress-count">0/7</b></button>
-        <button type="button" id="rules-toggle" class="toolbar-button">考评说明</button>
-        <button type="button" id="view-toggle" class="toolbar-button">视角</button>
         <button type="button" id="data-toggle" class="toolbar-button">运行数据</button>
         <button type="button" id="fullscreen" class="toolbar-button icon-button" aria-label="全屏">⛶</button>
       </header>
-
-      <nav id="view-menu" class="view-menu" aria-label="驾驶视角">
-        <button data-view="front" class="active">前方</button><button data-view="left">左侧</button><button data-view="right">右侧</button><button data-view="rearLeft">左后</button><button data-view="rearRight">右后</button>
-      </nav>
 
       <aside id="progress-panel" class="side-panel" aria-hidden="true">
         <div class="panel-head"><strong>考评记录</strong><button data-close-panel>×</button></div>
         <p>下列 7 项就是本次评分结构。绿色表示已产生有效记录；最终分值还取决于时机、速度和操纵平稳性。</p>
         <ol id="progress-list"></ol>
-      </aside>
-
-      <aside id="rules-panel" class="side-panel" aria-hidden="true">
-        <div class="panel-head"><strong>考评说明</strong><button data-close-panel>×</button></div>
-        <ul>
-          <li>上坡按“先闯后爬、闯爬结合”组织：限速内储备动能，逐级加载；进入长坡后速度自然下降并不等于操作错误。</li>
-          <li>下坡在入坡前建立动力制动，以动力制动承担持续制动力，空气制动仅在速度上沿补充。</li>
-          <li>空气制动采用一次有效减压并等待传播；缓解时保留动力制动，确认首尾列车管充分充风。</li>
-          <li>空电联锁按机车制动缸压力判断：列车空气制动可与动力制动配合，单独制动使机车制动缸达到 90 kPa 时切除动力制动。</li>
-          <li>撒砂不是固定步骤：无空转不撒砂同样可得满分；出现空转时及时降载，必要时撒砂。</li>
-          <li>LKJ常用、紧急制动以及坡停均按安全红线处理。</li>
-        </ul>
       </aside>
 
       <aside id="data-panel" class="side-panel data-panel" aria-hidden="true">
@@ -77,6 +58,10 @@
         <div class="motion-readout"><span>目标 <b id="target-speed">—</b></span><span>趋势 <b id="speed-trend">—</b></span><span>冲动 <b id="shock-state">低</b></span></div>
         <div id="slope-profile"></div>
       </section>
+
+      <button type="button" id="shock-stick" class="shock-stick" aria-label="扶正冲动棒">
+        <span></span><i></i><em>冲动棒</em>
+      </button>
 
       <div id="status-strip" class="status-strip" aria-live="polite">
         <b id="skill-name">坡道驾驶</b><span id="phase-name">准备开始</span><em id="status-message">仅考评模式</em>
@@ -128,7 +113,7 @@
           <div id="briefing-meta" class="briefing-meta"></div>
           <p id="briefing-physics" class="briefing-physics"></p>
           <div id="notch-reference" class="notch-reference"></div>
-          <h3>本次只看 7 项评分</h3>
+          <h3>核心操纵主线</h3>
           <ol id="briefing-scores" class="briefing-scores"></ol>
           <p class="briefing-note">目标不是逐字照抄固定步骤，而是在规定时机、速度带和设备逻辑内完成操纵。安全红线会把总分封顶为 59 分。</p>
           <div class="result-actions"><button type="button" id="briefing-back">返回选择</button><button type="button" id="briefing-start" class="primary">我已了解，开始考评</button></div>
@@ -154,6 +139,6 @@
   <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog" inert>
     <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
   </section>
-  <script type="module" src="./scripts/slopeDrivingApp.js"></script>
+  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2"></script>
 </body>
 </html>

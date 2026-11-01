@@ -1,4 +1,4 @@
-export const PROJECT_ID = 'hxd1c-slope-driving-training-v1';
+export const PROJECT_ID = 'hxd1c-slope-driving-training-v2';
 
 export const CAB = Object.freeze({ width: 640, height: 480 });
 
@@ -31,10 +31,12 @@ export const BRAKE_POSITIONS = Object.freeze([
   { value: 11, label: '紧急制动位', reduction: 600, function: '列车管紧急排风' },
 ]);
 
-export const TRACTION_TARGET_SPEEDS = Object.freeze([0, 10, 20, 30, 40, 50, 60, 70]);
+export const TRACTION_MAX = 12;
+export const DYNAMIC_BRAKE_MAX = 8;
+export const TRACTION_TARGET_SPEEDS = Object.freeze([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]);
 
 export function tractionTargetSpeed(notch) {
-  return TRACTION_TARGET_SPEEDS[Math.max(0, Math.min(7, Math.round(Number(notch) || 0)))] || 0;
+  return TRACTION_TARGET_SPEEDS[Math.max(0, Math.min(TRACTION_MAX, Math.round(Number(notch) || 0)))] || 0;
 }
 
 const uphillProfile = Object.freeze([
@@ -54,7 +56,7 @@ const downhillProfile = Object.freeze([
 ]);
 
 const uphillAssessmentItems = Object.freeze([
-  { id: 'briefing', label: '确认坡道、LKJ与列车制动状态', points: 10, studentGoal: '入坡前完成LKJ、列尾压力和坡道呼唤确认。' },
+  { id: 'briefing', label: '坡前确认', points: 10, studentGoal: '1.5 km前完成LKJ、列尾压力和坡道呼唤确认。' },
   { id: 'rush', label: '坡前闯坡与限速控制', points: 15, studentGoal: '在限速内保持坡前速度，并逐级建立牵引。' },
   { id: 'entry', label: '入坡渐进加载', points: 15, studentGoal: '坡度增加时逐级加载，允许速度自然下降但不能突然失速。' },
   { id: 'climb', label: '长坡牵引与速度趋势控制', points: 20, studentGoal: '在持续能力范围内保持牵引，长坡速度保持在目标带内。' },
@@ -64,11 +66,11 @@ const uphillAssessmentItems = Object.freeze([
 ]);
 
 const downhillAssessmentItems = Object.freeze([
-  { id: 'briefing', label: '确认制动条件、LKJ与列尾压力', points: 10, studentGoal: '入坡前确认LKJ、列尾压力和长大下坡任务。' },
-  { id: 'dynamic', label: '提前建立再生制动', points: 15, studentGoal: '牵引回零后逐级建立再生制动，不等速度上涨后再追赶。' },
-  { id: 'descent', label: '长坡目标速度带控制', points: 20, studentGoal: '以再生制动为主，将速度稳定在48～60 km/h。' },
-  { id: 'air', label: '空气制动补充与保持', points: 15, studentGoal: '动力制动不足时实施有效减压，等待制动传播，不频繁移动自阀。' },
-  { id: 'recharge', label: '空电联锁、缓解与充分充风', points: 15, studentGoal: '保持必要电制动，缓解空气制动并确认首尾列车管充分恢复。' },
+  { id: 'briefing', label: '入坡确认', points: 10, studentGoal: '1.2 km前确认LKJ纵断面、列尾压力、-13‰长坡和8.2 km限速70→55。' },
+  { id: 'dynamic', label: '提前建立动力制动', points: 15, studentGoal: '-7‰前牵引回零并预置低级动力制动，再按速度趋势调整。' },
+  { id: 'descent', label: '长坡目标速度带控制', points: 20, studentGoal: '进入-13‰后以动力制动为主，稳定在48～60 km/h；趋势稳定时不频繁操作。' },
+  { id: 'air', label: '空气制动补充与保持', points: 15, studentGoal: '高位动力制动仍不足时，保持动力制动并实施不小于50 kPa有效减压。' },
+  { id: 'recharge', label: '缓解充风与空电联锁', points: 15, studentGoal: '速度回落且动力制动能控速时，先缓解空气制动，保持动力制动并确认首尾充风。' },
   { id: 'restriction', label: '限速点前完成减速', points: 15, studentGoal: '进入8.2 km限速点以前将速度降至55 km/h及以下。' },
   { id: 'smooth', label: '平稳操纵与安全结果', points: 10, studentGoal: '控制纵向冲动和制动热负荷，全程不触发安全红线。' },
 ]);
@@ -94,6 +96,7 @@ export const SCENARIOS = Object.freeze({
     routeLabel: '坡前—长大上坡—坡顶',
     profile: uphillProfile,
     assessmentItems: uphillAssessmentItems,
+    briefingSteps: ['坡前确认并在限速内储备动能', '进入+6‰后根据速度趋势保持或加载', '+12‰长坡稳定牵引，按需处置空转', '坡顶前预判退牵引', '全程控制超速、冲动和大跨级'],
     physicalExpectation: '坡前速度接近限速；进入+12‰长坡后，即使保持较高牵引，速度也应逐步下降；越过坡顶后速度重新回升。',
     restrictions: [{ start: 0, limit: 70 }],
     markers: [
@@ -123,6 +126,7 @@ export const SCENARIOS = Object.freeze({
     routeLabel: '坡顶—长大下坡—限速区',
     profile: downhillProfile,
     assessmentItems: downhillAssessmentItems,
+    briefingSteps: ['1.2 km前完成LKJ、列尾与坡道确认', '-7‰前牵引回零并预置低级动力制动', '进入-13‰后按速度趋势逐级调整动力制动', '高位动力制动仍不足时补充空气制动', '速度回落后先缓解空气制动，保持动力制动完成充风', '8.2 km限速70→55前完成预控'],
     physicalExpectation: '进入-13‰长坡后列车持续增速；再生制动先承担持续制动力，空气制动用于补充，缓解后必须等待全列充分充风。',
     restrictions: [
       { start: 0, limit: 70 },

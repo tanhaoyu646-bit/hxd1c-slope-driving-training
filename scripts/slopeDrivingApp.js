@@ -6,6 +6,7 @@ import {
   INDEPENDENT_BRAKE_MAX,
   INDEPENDENT_BRAKE_POSITIONS,
   PROJECT_ID,
+  TRACTION_MAX,
   TRACTION_TARGET_SPEEDS,
   getScenario,
 } from './slopeDrivingConfig.js';
@@ -49,6 +50,7 @@ let cabNoticeUntil = 0;
 let hornPointerId = null;
 let sideReleasePointerId = null;
 let pendingScenarioId = 'uphill';
+let mobileEntered = false;
 const overlay = $('#cab-overlay');
 const elements = {};
 const hornAudio = new Audio('./assets/audio/HXD1C-horn.wav');
@@ -113,7 +115,7 @@ function setupCandidateGate() {
     updateCandidateGate();
   });
   [name, studentId].forEach((input) => input.addEventListener('input', updateCandidateGate));
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!candidateRouteReady || !candidateCabReady || candidateLoadFailed) return;
     const validation = validateCandidate({ name: name.value, studentId: studentId.value });
@@ -131,7 +133,8 @@ function setupCandidateGate() {
     $('.training-app').inert = false;
     $('#landscape-gate').inert = false;
     updateMobileMode();
-    routeScene.resize();
+    if (isMobileLike()) await enterImmersive();
+    else routeScene.resize();
   });
   updateCandidateGate();
 }
@@ -231,7 +234,8 @@ function frame(element, index, columns, rows) {
 }
 
 function tractionFrame(value) {
-  return value > 0 ? Math.max(0, 7 - Math.min(7, value)) : value === 0 ? 7 : Math.min(15, 7 + Math.min(8, Math.abs(value)));
+  // 原贴图牵引区只有7个姿态；12个教学级位按手柄全行程比例映射到现有姿态。
+  return value > 0 ? Math.max(0, 7 - Math.round(Math.min(TRACTION_MAX, value) / TRACTION_MAX * 7)) : value === 0 ? 7 : Math.min(15, 7 + Math.min(8, Math.abs(value)));
 }
 
 function createCabControls() {
@@ -289,7 +293,7 @@ function createCabControls() {
   const controls = [
     ['auto', elements.auto, 0, AUTO_BRAKE_SPRITE_FRAMES.length - 1, 7],
     ['independent', elements.independent, 0, INDEPENDENT_BRAKE_MAX, 7],
-    ['traction', elements.traction, -8, 7, 19],
+    ['traction', elements.traction, -8, TRACTION_MAX, 13],
   ];
   for (const [id, sprite, min, max, step] of controls) {
     const begin = (event) => {
@@ -326,7 +330,7 @@ function adjustControl(id, delta) {
   const stateKey = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
   const type = id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction';
   const min = id === 'traction' ? -8 : 0;
-  const max = id === 'traction' ? 7 : id === 'auto' ? AUTO_BRAKE_SPRITE_FRAMES.length - 1 : INDEPENDENT_BRAKE_MAX;
+  const max = id === 'traction' ? TRACTION_MAX : id === 'auto' ? AUTO_BRAKE_SPRITE_FRAMES.length - 1 : INDEPENDENT_BRAKE_MAX;
   simulation.command(type, clamp(simulation.state[stateKey] + delta, min, max));
 }
 
@@ -420,9 +424,9 @@ function openBriefing(id) {
     ['线路', scenario.routeLabel],
     ['天气/黏着', scenario.weather],
   ].map(([key, value]) => `<div><span>${key}</span><b>${value}</b></div>`).join('');
-  $('#briefing-physics').innerHTML = `<b>应当观察到的物理现象：</b>${scenario.physicalExpectation}`;
-  $('#notch-reference').innerHTML = `<b>牵引主手柄给定</b><span>本教学模型按 1—7 级对应 ${TRACTION_TARGET_SPEEDS.slice(1).join('、')} km/h 的给定速度。6级为60 km/h；实际能否稳住该速度受坡度、载重、黏着和牵引能力限制，不等于无条件定速。</span>`;
-  $('#briefing-scores').innerHTML = scenario.assessmentItems.map((item) => `<li><b>${item.label}<em>${item.points}分</em></b><span>${item.studentGoal}</span></li>`).join('');
+  $('#briefing-physics').innerHTML = `<b>核心策略：</b>${scenario.id === 'uphill' ? '先闯后爬、趋势控制、坡顶预判。' : '提前预控、动力为主、空气为辅、先缓解空气后完成充风。'}`;
+  $('#notch-reference').innerHTML = `<b>牵引主手柄给定</b><span>牵引区1—12级对应10—120 km/h参考目标，6级为60 km/h。实际速度仍受坡度、载重、黏着和牵引能力限制。</span>`;
+  $('#briefing-scores').innerHTML = scenario.briefingSteps.map((step, index) => `<li><b>${index + 1}. ${step}</b></li>`).join('');
   $('#skill-picker').classList.remove('open');
   $('#briefing-modal').classList.add('open');
   $('#briefing-modal').setAttribute('aria-hidden', 'false');
@@ -434,6 +438,24 @@ function selectView(view) {
   overlay.classList.toggle('hidden', view !== 'front');
   document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
   routeScene?.setView(view);
+}
+
+function operationHint(state) {
+  if (simulation.scenario.id === 'uphill') {
+    if (state.distance < 1500) return '坡前确认LKJ与列尾，在限速70内保持63—70 km/h';
+    if (state.distance < 2500) return state.speedTrend < -.12 ? '进入+6‰：速度下降，按需逐级增加牵引' : '进入+6‰：趋势稳定，可保持当前牵引';
+    if (state.distance < 7600) return state.wheelSlip ? '发生空转：先降低牵引，必要时短时撒砂' : '长坡：按速度趋势管理牵引，不需要频繁移动手柄';
+    if (state.distance < 8600) return '接近坡顶：根据坡度减小和速度回升逐级退牵引';
+    return '越过坡顶：防止速度回升超过线路限速';
+  }
+  if (state.distance < 800) return '坡前确认LKJ纵断面、列尾压力和8.2 km限速点';
+  if (state.distance < 1200) return state.traction >= 0 ? '-7‰前：牵引回零并预置动力制动1级' : '-7‰前：低级动力制动已建立，观察速度趋势';
+  if (state.distance < 2200) return state.speedTrend > .08 ? '-7‰过渡坡：速度仍升，逐级增加动力制动' : '-7‰过渡坡：趋势稳定，保持当前动力制动';
+  if (state.autoBrake > 0) return state.speed <= 56 ? '速度已回落：保持动力制动，先将自阀回运转位充风' : '空气制动作用中：保持动力制动，等待全列制动建立';
+  if (!state.rechargeReady) return '空气制动已缓解：保持动力制动，观察首尾列车管充风';
+  if (state.distance < 7000) return state.speed >= 58 && state.speedTrend > .04 ? '接近上沿且仍增速：增加动力制动；高位仍不足再用初制动' : '长坡：48—60 km/h内按趋势保持或逐级调整动力制动';
+  if (state.distance < 8200) return '接近55 km/h限速点：根据LKJ控制曲线提前完成减速';
+  return '限速区：保持55 km/h及以下，避免频繁制动和缓解';
 }
 
 function render() {
@@ -469,7 +491,7 @@ function render() {
   $('#phase-name').textContent = s.phase?.label || '坡道考评区段';
   const levelText = { normal: '监控正常', warning: 'LKJ报警', unload: 'LKJ卸载', service: 'LKJ常用制动', emergency: 'LKJ紧急制动' }[s.lkjLevel];
   const normalStatus = `${levelText} · 当前坡度 ${s.grade >= 0 ? '+' : ''}${s.grade.toFixed(1)}‰ · 剩余 ${Math.max(0, scenario.finishDistance - s.distance).toFixed(0)} m`;
-  $('#status-message').textContent = performance.now() < cabNoticeUntil ? cabNotice : normalStatus;
+  $('#status-message').textContent = performance.now() < cabNoticeUntil ? cabNotice : normalStatus + ' · ' + operationHint(s);
   const progress = assessment.progress(s);
   $('#progress-count').textContent = `${progress.done}/${progress.total}`;
   renderProgress(progress);
@@ -487,6 +509,8 @@ function render() {
   const shockLabel = s.shockIndex >= 72 ? '明显' : s.shockIndex >= 42 ? '可感' : '低';
   $('#shock-state').textContent = `${shockLabel} ${s.shockIndex.toFixed(0)}`;
   $('#shock-state').className = s.shockIndex >= 72 ? 'danger' : s.shockIndex >= 42 ? 'warning' : '';
+  $('#shock-stick').style.setProperty('--shock-stick-angle', `${s.shockStickTilt.toFixed(1)}deg`);
+  $('#shock-stick').classList.toggle('fallen', s.shockStickTilt >= 70);
   const shake = Math.min(3.2, Math.max(0, s.shockIndex - 34) / 18);
   const shakePhase = s.elapsed * 34;
   $('#stage').style.setProperty('--shock-x', `${Math.sin(shakePhase) * shake}px`);
@@ -500,7 +524,7 @@ function render() {
 function renderProgress(progress) {
   $('#progress-list').innerHTML = progress.items.map((item, index) => {
     const status = progress.statuses[index];
-    const score = status === 'done' ? `已得${item.points}分` : status === 'active' ? `当前·${item.points}分` : `待解锁·${item.points}分`;
+    const score = status === 'done' ? `已记录·${item.points}分` : status === 'active' ? `监测中·${item.points}分` : status === 'settled' ? `已结算·${item.points}分` : `待进入·${item.points}分`;
     return `<li class="${status}"><b><span>${index + 1}. ${item.label}</span><em>${score}</em></b><small>${item.studentGoal}</small></li>`;
   }).join('');
 }
@@ -585,13 +609,42 @@ function updateViewportVariables() {
   document.documentElement.style.setProperty('--visual-offset-top', `${viewport?.offsetTop || 0}px`);
 }
 
-function updateMobileMode() {
+function isMobileLike() {
   const compactLandscape = window.innerHeight <= 620 && window.innerWidth <= 1200;
   const compactViewport = Math.min(window.innerWidth, window.innerHeight) < 900;
-  const mobile = matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 900 || compactViewport || compactLandscape;
+  return matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || compactViewport || compactLandscape;
+}
+
+function updateMobileMode() {
+  const mobile = isMobileLike();
   document.body.classList.toggle('mobile-controls-enabled', mobile);
   const portrait = mobile && matchMedia('(orientation: portrait)').matches;
   $('#landscape-gate').hidden = !portrait;
+}
+
+async function enterImmersive() {
+  mobileEntered = true;
+  document.documentElement.classList.add('immersive');
+  $('#landscape-gate').hidden = true;
+  try {
+    const root = document.documentElement;
+    if (!document.fullscreenElement && root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+    else if (!document.webkitFullscreenElement && root.webkitRequestFullscreen) await root.webkitRequestFullscreen();
+  } catch { /* iPhone Safari等浏览器拒绝真全屏时继续使用CSS沉浸模式。 */ }
+  try { await screen.orientation?.lock?.('landscape'); } catch { /* 部分浏览器不允许锁定方向。 */ }
+  updateViewportVariables();
+  setTimeout(() => { scrollTo(0, 1); updateMobileMode(); routeScene.resize(); }, 120);
+}
+
+async function exitImmersive() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else if (document.webkitFullscreenElement) await document.webkitExitFullscreen();
+  } catch { /* CSS状态仍可退出。 */ }
+  mobileEntered = false;
+  document.documentElement.classList.remove('immersive');
+  updateMobileMode();
+  routeScene.resize();
 }
 
 function setupMobileControls() {
@@ -609,15 +662,15 @@ function setupMobileControls() {
   release.addEventListener('pointerup', stopSideRelease);
   release.addEventListener('pointercancel', stopSideRelease);
   $('#enter-training').addEventListener('click', async () => {
-    $('#landscape-gate').hidden = true;
-    try { await $('#stage').requestFullscreen?.(); } catch { /* 移动浏览器可拒绝非必要全屏 */ }
+    await enterImmersive();
   });
   updateViewportVariables();
   updateMobileMode();
   window.visualViewport?.addEventListener('resize', updateViewportVariables);
   window.visualViewport?.addEventListener('scroll', updateViewportVariables);
   window.addEventListener('resize', () => { updateViewportVariables(); updateMobileMode(); });
-  window.addEventListener('orientationchange', updateMobileMode);
+  window.addEventListener('orientationchange', () => { updateViewportVariables(); updateMobileMode(); setTimeout(() => routeScene.resize(), 160); });
+  document.addEventListener('fullscreenchange', () => { updateViewportVariables(); routeScene.resize(); });
 }
 
 function animationFrame(now) {
@@ -638,20 +691,18 @@ document.querySelectorAll('[data-scenario]').forEach((button) => button.addEvent
 $('#briefing-back').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 $('#briefing-start').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); chooseScenario(pendingScenarioId); });
 $('#callout').addEventListener('click', () => simulation.command('callout'));
-$('#tail-query').addEventListener('click', () => { lkj.close(); cir.show(); });
 $('#sand').addEventListener('click', () => simulation.command('sand'));
+$('#shock-stick').addEventListener('click', () => simulation.command('shock-reset'));
 $('#progress-toggle').addEventListener('click', () => togglePanel($('#progress-panel')));
-$('#rules-toggle').addEventListener('click', () => togglePanel($('#rules-panel')));
 $('#data-toggle').addEventListener('click', () => togglePanel($('#data-panel')));
-$('#view-toggle').addEventListener('click', () => $('#view-menu').classList.toggle('open'));
 document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => { selectView(button.dataset.view); $('#view-menu').classList.remove('open'); }));
 document.querySelectorAll('[data-close-panel]').forEach((button) => button.addEventListener('click', () => togglePanel(button.closest('.side-panel'))));
-$('#fullscreen').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : $('#stage').requestFullscreen());
+$('#fullscreen').addEventListener('click', () => document.fullscreenElement || document.documentElement.classList.contains('immersive') ? exitImmersive() : enterImmersive());
 $('#retry').addEventListener('click', () => chooseScenario(simulation.state.scenarioId));
 $('#choose-skill').addEventListener('click', () => { $('#result-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 $('#change-candidate').addEventListener('click', () => { clearCandidateDraft(); location.reload(); });
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu').classList.remove('open'); lkj.close(); cir.close(); }
+  if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu')?.classList.remove('open'); lkj.close(); cir.close(); }
   if (event.key.toLowerCase() === 's') simulation.command('sand');
 });
 

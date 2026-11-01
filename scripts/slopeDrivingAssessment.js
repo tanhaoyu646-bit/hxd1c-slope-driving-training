@@ -18,34 +18,35 @@ export class SlopeDrivingAssessment {
         && events.some((item) => item.type === 'tail-query' && item.distance < 1500)
         && events.some((item) => item.type === 'callout' && item.distance < 1500),
       state.distance >= 1500 && samples.filter((item) => item.distance < 1500 && item.speed >= 63).length >= 5,
-      state.distance >= 2500 && events.some((item) => item.type === 'traction' && item.distance < 2700 && item.value >= 4),
+      state.distance >= 2500 && samplesBetween(samples, 1200, 2700).some((item) => item.traction > 0),
       state.distance >= 3300 && samplesBetween(samples, 2500, state.distance).filter((item) => between(item.speed, 40, 62)).length >= 5,
       state.distance >= 3900 && state.slipDuration <= 6,
-      state.distance >= 8600 && events.some((item) => item.type === 'traction' && between(item.distance, 7600, 8600) && item.value <= 3),
+      state.distance >= 8600 && events.some((item) => item.type === 'traction' && between(item.distance, 7600, 8800) && item.value < item.previous?.traction),
       state.completed,
     ] : [
       events.some((item) => item.type === 'lkj-open' && item.distance < 1200)
         && events.some((item) => item.type === 'tail-query' && item.distance < 1200)
         && events.some((item) => item.type === 'callout' && item.distance < 1200),
-      state.distance >= 2200 && events.some((item) => item.type === 'traction' && item.value < 0 && item.distance < 2200),
+      state.distance >= 2200 && events.some((item) => item.type === 'traction' && item.value < 0 && between(item.distance, 400, 1600)),
       state.distance >= 3500 && samplesBetween(samples, 2200, state.distance).filter((item) => between(item.speed, 48, 60)).length >= 5,
-      events.some((item) => item.type === 'auto-brake' && item.value > 0 && item.distance >= 2200),
-      events.some((item) => item.type === 'recharge-ready' && item.distance > 2200)
-        && events.some((item) => item.type === 'auto-brake' && item.value === 0 && item.previous?.autoBrake > 0),
+      state.distance >= 8200 && (events.some((item) => item.type === 'auto-brake' && item.value > 0 && item.distance >= 2200)
+        || samplesBetween(samples, 2200, 8200).every((item) => item.speed <= 60)),
+      state.distance >= 8200 && (!events.some((item) => item.type === 'auto-brake' && item.value > 0)
+        || (events.some((item) => item.type === 'recharge-ready' && item.distance > 2200)
+          && events.some((item) => item.type === 'auto-brake' && item.value === 0 && item.previous?.autoBrake > 0))),
       state.distance >= 8200 && samples.filter((item) => item.distance < 8200).at(-1)?.speed <= 55,
       state.completed,
     ];
-    const checks = [];
-    let sequenceOpen = true;
-    for (const check of rawChecks) {
-      const done = sequenceOpen && Boolean(check);
-      checks.push(done);
-      if (!done) sequenceOpen = false;
-    }
-    const currentIndex = checks.findIndex((item) => !item);
-    const statuses = checks.map((done, index) => (
-      done ? 'done' : index === currentIndex ? 'active' : 'locked'
-    ));
+    const checks = rawChecks.map(Boolean);
+    const windows = uphill
+      ? [[0, 1500], [0, 1500], [1200, 2700], [2500, 8000], [2500, 8000], [7600, 8800], [0, Infinity]]
+      : [[0, 1200], [400, 2200], [2200, 8200], [2200, 8200], [2200, 9000], [7000, 8200], [0, Infinity]];
+    const statuses = checks.map((done, index) => {
+      if (done) return 'done';
+      const [start, end] = windows[index];
+      return state.distance >= start && state.distance <= end ? 'active' : state.distance > end ? 'settled' : 'pending';
+    });
+    const currentIndex = statuses.findIndex((status) => status === 'active');
     return {
       done: checks.filter(Boolean).length,
       total: checks.length,
@@ -96,10 +97,10 @@ export class SlopeDrivingAssessment {
 
     const entrySamples = samplesBetween(samples, 1200, 2700);
     let entry = 15;
-    if (!events.some((event) => event.type === 'traction' && event.distance < 2700 && event.value >= 4)) entry -= 6;
-    if (events.some((event) => event.type === 'traction' && between(event.distance, 1200, 2700) && eventJump(event, 'traction') > 2)) entry -= 5;
-    if (!entrySamples.length || Math.min(...entrySamples.map((sample) => sample.speed)) < 52 || state.maxShockIndex > 72) entry -= 4;
-    categories.push(category('入坡稳牵引', entry, 15, '先闯后爬但不猛推，允许速度自然回落'));
+    if (!entrySamples.some((sample) => sample.traction > 0)) entry -= 6;
+    if (events.some((event) => event.type === 'traction' && between(event.distance, 1200, 2700) && eventJump(event, 'traction') > 3)) entry -= 5;
+    if (!entrySamples.length || Math.min(...entrySamples.map((sample) => sample.speed)) < 50 || state.maxShockIndex > 72) entry -= 4;
+    categories.push(category('入坡稳牵引', entry, 15, '允许保持已有牵引；需要调整时逐级进行，速度自然回落不扣分'));
 
     const climbSamples = samplesBetween(samples, 2500, 8000);
     const outsideClimbRatio = climbSamples.length
@@ -117,13 +118,15 @@ export class SlopeDrivingAssessment {
     if (slipEvent) {
       const correction = events.find((event) => event.elapsed >= slipEvent.elapsed
         && event.elapsed - slipEvent.elapsed <= 4
-        && (event.type === 'sand' || (event.type === 'traction' && event.value < event.previous.traction)));
+        && ((event.type === 'sand' && event.useful) || (event.type === 'traction' && event.value < event.previous.traction)));
       if (!correction) adhesion -= 7;
     }
+    if (state.unnecessarySandingCount > 1) adhesion -= Math.min(4, state.unnecessarySandingCount - 1);
     categories.push(category('黏着处置', adhesion, 15, '不强制撒砂；出现空转后4秒内降级或撒砂'));
 
     let crest = 15;
-    if (!events.some((event) => event.type === 'traction' && between(event.distance, 7600, 8600) && event.value <= 3)) crest -= 8;
+    const crestMoves = events.filter((event) => event.type === 'traction' && between(event.distance, 7600, 8800));
+    if (!crestMoves.some((event) => event.value < event.previous?.traction)) crest -= 8;
     if (samples.some((sample) => sample.distance > 8000 && sample.speed > sample.lineLimit + .5)) crest -= 7;
     categories.push(category('坡顶预控', crest, 15, '坡顶前回牵引，防止越顶加速超限'));
 
@@ -150,7 +153,7 @@ export class SlopeDrivingAssessment {
 
     const firstDynamic = events.find((event) => event.type === 'traction' && event.value < 0);
     let dynamic = 15;
-    if (!firstDynamic || !between(firstDynamic.distance, 400, 2200)) dynamic -= 7;
+    if (!firstDynamic || !between(firstDynamic.distance, 400, 1600)) dynamic -= 7;
     if (events.some((event) => event.type === 'traction' && event.distance < 2200 && eventJump(event, 'traction') > 2)) dynamic -= 4;
     if (samplesBetween(samples, 0, 2200).some((sample) => sample.speed > 62)) dynamic -= 4;
     categories.push(category('预置动力制动', dynamic, 15, '入坡前逐级建立动力制动，入口不超过62 km/h'));
@@ -169,18 +172,23 @@ export class SlopeDrivingAssessment {
     categories.push(category('长坡稳速', descent, 20, '动力制动为主，48—60 km/h稳定运行'));
 
     const applications = events.filter((event) => event.type === 'auto-brake' && event.value > 0 && event.previous?.autoBrake === 0);
+    const airNeedSamples = descentSamples.filter((sample) => sample.speed >= 58
+      && sample.traction <= -6 && sample.acceleration * 3.6 > .04);
+    const airNeeded = airNeedSamples.length >= 4;
     let air = 15;
-    if (!applications.length) air -= 8;
+    if (airNeeded && !applications.length) air -= 8;
+    if (!airNeeded && applications.some((event) => event.speed < 56)) air -= 4;
+    if (applications.some((event) => event.previous?.traction >= 0)) air -= 4;
     const maximumReduction = Math.max(0, ...samples.map((sample) => this.simulation.scenario.nominalPipePressure - sample.trainPipe));
-    if (maximumReduction < 45) air -= 4;
+    if (applications.length && maximumReduction < 50) air -= 4;
     const autoEvents = events.filter((event) => event.type === 'auto-brake');
     if (autoEvents.some((event, index) => index > 0 && event.elapsed - autoEvents[index - 1].elapsed < 6)) air -= 3;
-    categories.push(category('空气补充制动', air, 15, '速度上沿时一次有效减压，避免频繁小减压'));
+    categories.push(category('空气补充制动', air, 15, airNeeded ? '高位动力制动仍不能控速时，保持动力制动并实施≥50 kPa有效减压' : '动力制动能够控速时不强制使用空气制动'));
 
     const releases = events.filter((event) => event.type === 'auto-brake' && event.value === 0 && event.previous?.autoBrake > 0);
     let recharge = 15;
-    if (!releases.length || releases.some((event) => event.previous?.traction >= 0)) recharge -= 5;
-    if (!events.some((event) => event.type === 'recharge-ready' && event.distance > 2200)) recharge -= 6;
+    if (applications.length && (!releases.length || releases.some((event) => event.previous?.traction >= 0))) recharge -= 5;
+    if (applications.length && !events.some((event) => event.type === 'recharge-ready' && event.distance > 2200)) recharge -= 6;
     const interlockSamples = samples.filter((sample) => sample.brake > 0 && sample.traction < 0);
     if (!interlockSamples.some((sample) => sample.locomotiveCylinder < 90 && sample.dynamicBrakeForce > 0)) recharge -= 4;
     categories.push(category('缓解充风与联锁', recharge, 15, '保留动力制动缓解空气制动，确认充风；单缓≥90 kPa切除动力制动'));

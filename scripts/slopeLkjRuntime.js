@@ -119,10 +119,19 @@ export class SlopeLkjRuntime {
     const span = Math.max(800, maximum - start);
     const speedPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.speed / 120 * height}`).join(' ');
     const limitPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.limit / 120 * height}`).join(' ');
+    let elevation = 44;
+    const profilePoints = [`0,${elevation}`];
+    for (const phase of scenario.profile) {
+      const segmentWidth = (phase.end - phase.start) / scenario.finishDistance * width;
+      elevation -= (phase.gradeStart + phase.gradeEnd) / 2 * segmentWidth / 28;
+      profilePoints.push(`${phase.end / scenario.finishDistance * width},${Math.max(7, Math.min(75, elevation))}`);
+    }
+    const profileMarker = Math.max(0, Math.min(width, state.distance / scenario.finishDistance * width));
     return `<div class="lkj-native-main level-${state.lkjLevel}">
       <b class="native-speed">${fmt(state.speed)}</b><b class="native-limit">${fmt(state.lkjLimit)}</b><b class="native-distance">${fmt(Math.max(0, scenario.finishDistance - state.distance))}</b>
       <span class="native-signal">预告</span><span class="native-km">${fmt(state.distance / 1000, 3)}</span><span class="native-clock">${new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span>
       <svg class="native-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><polyline class="limit" points="${limitPoints}"/><polyline class="speed" points="${speedPoints}"/></svg>
+      <svg class="native-grade-profile" viewBox="0 0 ${width} 82" preserveAspectRatio="none"><polyline points="${profilePoints.join(' ')}"/><line x1="${profileMarker}" x2="${profileMarker}" y1="2" y2="80"/></svg>
       <div class="native-status">${state.phase.label}　${state.grade >= 0 ? '+' : ''}${fmt(state.grade, 1)}‰　尾压${fmt(state.tailPipe)}kPa</div>
     </div>`;
   }

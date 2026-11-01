@@ -1,6 +1,7 @@
 import {
   adhesionAt,
   BRAKE_POSITIONS,
+  DYNAMIC_BRAKE_MAX,
   getScenario,
   gradeAt,
   INDEPENDENT_BRAKE_MAX,
@@ -8,6 +9,7 @@ import {
   lkjControlLimit,
   phaseAt,
   targetBandAt,
+  TRACTION_MAX,
   tractionTargetSpeed,
 } from './slopeDrivingConfig.js';
 
@@ -35,6 +37,7 @@ export class SlopeDrivingSimulation extends EventTarget {
       speedTrend: 0,
       shockIndex: 0,
       maxShockIndex: 0,
+      shockStickTilt: 0,
       controlShock: 0,
       couplerForce: 0,
       traction: scenario.initialTraction,
@@ -65,11 +68,14 @@ export class SlopeDrivingSimulation extends EventTarget {
       lkjOpenCount: 0,
       calloutCount: 0,
       cirOpenCount: 0,
-      tailDeviceId: '',
-      tailDeviceLinked: false,
+      tailDeviceId: '100001',
+      tailDeviceLinked: true,
       tailQueryCount: 0,
       sandRemaining: 0,
       sandingCount: 0,
+      unnecessarySandingCount: 0,
+      lastSandAt: -999,
+      lastCalloutAt: -999,
       wheelSlip: false,
       slipDuration: 0,
       tractionForce: 0,
@@ -93,6 +99,7 @@ export class SlopeDrivingSimulation extends EventTarget {
     this.previousRecharge = true;
     this.lowSpeedTime = 0;
     this.previousAcceleration = 0;
+    this.adhesionSeed = Math.random() * Math.PI * 2;
     this.dispatchEvent(new CustomEvent('reset', { detail: this.state }));
     return this.state;
   }
@@ -116,7 +123,7 @@ export class SlopeDrivingSimulation extends EventTarget {
       sideRelease: s.sideRelease,
     };
     if (type === 'traction') {
-      s.traction = clamp(Math.round(Number(value) || 0), -8, 7);
+      s.traction = clamp(Math.round(Number(value) || 0), -DYNAMIC_BRAKE_MAX, TRACTION_MAX);
       s.tractionTargetSpeed = tractionTargetSpeed(s.traction);
     } else if (type === 'auto-brake') {
       const requested = clamp(Math.round(Number(value) || 0), 0, BRAKE_POSITIONS.length - 1);
@@ -131,9 +138,19 @@ export class SlopeDrivingSimulation extends EventTarget {
     }
     else if (type === 'side-release') s.sideRelease = Boolean(value);
     else if (type === 'sand') {
+      if (s.elapsed - s.lastSandAt < 2.5) {
+        this.log('sand-rejected', { reason: '重复撒砂间隔不足' });
+        return false;
+      }
+      s.lastSandAt = s.elapsed;
       s.sandRemaining = Math.max(s.sandRemaining, 5);
       s.sandingCount += 1;
-      this.log('sand');
+      const useful = s.traction > 0 && (s.wheelSlip || s.adhesionCoefficient < .285);
+      if (!useful) s.unnecessarySandingCount += 1;
+      this.log('sand', { useful });
+    } else if (type === 'shock-reset') {
+      s.shockStickTilt = 0;
+      this.log('shock-stick-reset', { retainedMaximum: s.maxShockIndex });
     } else if (type === 'cir-open') {
       s.cirOpenCount += 1;
       this.log('cir-open');
@@ -161,6 +178,11 @@ export class SlopeDrivingSimulation extends EventTarget {
       s.direction = value;
       this.log('direction', { value });
     } else if (type === 'callout') {
+      if (s.elapsed - s.lastCalloutAt < 3) {
+        this.log('callout-rejected', { reason: '重复呼唤间隔不足' });
+        return false;
+      }
+      s.lastCalloutAt = s.elapsed;
       s.calloutCount += 1;
       this.log('callout', { phase: s.phase.id, grade: s.grade });
     } else if (type === 'lkj-open') {
@@ -256,7 +278,11 @@ export class SlopeDrivingSimulation extends EventTarget {
     s.grade = gradeAt(this.scenario, s.distance);
     s.phase = phaseAt(this.scenario, s.distance);
     s.targetBand = targetBandAt(this.scenario, s.distance);
-    s.adhesionCoefficient = adhesionAt(this.scenario, s.distance);
+    const baseAdhesion = adhesionAt(this.scenario, s.distance);
+    const lowAdhesionDisturbance = baseAdhesion < .29
+      ? Math.sin(s.distance * .021 + this.adhesionSeed) * .009 + Math.sin(s.elapsed * .73 + this.adhesionSeed) * .004
+      : 0;
+    s.adhesionCoefficient = clamp(baseAdhesion + lowAdhesionDisturbance, .22, .34);
     s.lineLimit = lineLimitAt(this.scenario, s.distance);
     s.lkjLimit = lkjControlLimit(this.scenario, s.distance);
     if (s.phase.id !== this.previousPhaseId) {
@@ -271,9 +297,11 @@ export class SlopeDrivingSimulation extends EventTarget {
     s.gradeForce = mass * 9.81 * s.grade / 1000;
     const adhesionCoefficient = Math.max(s.adhesionCoefficient, s.sandRemaining > 0 ? .33 : 0);
     const adhesion = adhesionCoefficient * locomotiveMass * 9.81;
-    const tractionFraction = Math.max(0, s.traction) / 7;
+    // 牵引级位表示目标速度给定，不把12级按比例放大物理牵引上限。
+    // 6级保持与上一版接近的牵引权限，8—12级只增加目标速度和少量可用裕量。
+    const tractionAuthority = s.traction > 0 ? clamp(.72 + .28 * s.traction / TRACTION_MAX, 0, 1) : 0;
     const tractionEnvelope = Math.min(520_000, 7_200_000 / speedMps);
-    const notchMaximum = tractionFraction * tractionEnvelope;
+    const notchMaximum = tractionAuthority * tractionEnvelope;
     const speedError = s.tractionTargetSpeed - s.speed;
     const holdingForce = Math.max(0, s.rollingResistance + s.gradeForce);
     const controllerForce = holdingForce + speedError * mass * .0075;
@@ -313,6 +341,7 @@ export class SlopeDrivingSimulation extends EventTarget {
     s.controlShock *= Math.exp(-dt / 1.15);
     s.shockIndex = clamp(Math.abs(s.jerk) * 24 + s.controlShock, 0, 100);
     s.maxShockIndex = Math.max(s.maxShockIndex, s.shockIndex);
+    if (s.shockIndex > 35) s.shockStickTilt = Math.max(s.shockStickTilt, clamp((s.shockIndex - 35) / 65 * 88, 0, 88));
     s.couplerForce = Math.abs(newAcceleration - s.acceleration) * mass * .22;
     s.speedTrend = s.acceleration * 3.6;
     this.previousAcceleration = newAcceleration;
@@ -374,7 +403,8 @@ export class SlopeDrivingSimulation extends EventTarget {
     let balance = 0;
     for (let speed = 2; speed <= target; speed += 1) {
       const speedMps = Math.max(.5, speed / 3.6);
-      const available = Math.min(adhesion, notch / 7 * Math.min(520_000, 7_200_000 / speedMps));
+      const authority = clamp(.72 + .28 * notch / TRACTION_MAX, 0, 1);
+      const available = Math.min(adhesion, authority * Math.min(520_000, 7_200_000 / speedMps));
       const resistance = 34_000 + mass * .0045 + speedMps * speedMps * 55 + mass * 9.81 * grade / 1000;
       if (available >= Math.max(0, resistance)) balance = speed;
     }
