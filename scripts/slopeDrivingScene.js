@@ -12,8 +12,54 @@ export class SlopeDrivingScene extends MstsRouteScene {
   async load() {
     await super.load();
     this.startOffset = this.slopeScenario.startOffset;
+    this.buildRouteGround();
     this.buildSlopeBoards();
     this.applyCamera();
+  }
+
+  buildRouteGround() {
+    this.routeGround?.geometry?.dispose?.();
+    this.routeGround?.material?.dispose?.();
+    if (this.routeGround) this.routeRoot.remove(this.routeGround);
+    const endDistance = Math.min(this.pathLength, 10_700);
+    const step = 55;
+    const halfWidth = 145;
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    const point = new THREE.Vector3();
+    const before = new THREE.Vector3();
+    const after = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    let row = 0;
+    for (let distance = 0; distance <= endDistance; distance += step) {
+      this.getPathPosition(distance, point);
+      this.getPathPosition(Math.max(0, distance - 3), before);
+      this.getPathPosition(Math.min(endDistance, distance + 3), after);
+      right.subVectors(after, before).setY(0).normalize();
+      right.set(right.z, 0, -right.x).normalize();
+      positions.push(
+        point.x - right.x * halfWidth, point.y - .28, point.z - right.z * halfWidth,
+        point.x + right.x * halfWidth, point.y - .28, point.z + right.z * halfWidth,
+      );
+      uvs.push(0, distance / 90, 1, distance / 90);
+      if (row > 0) {
+        const current = row * 2;
+        const previous = current - 2;
+        indices.push(previous, current, previous + 1, previous + 1, current, current + 1);
+      }
+      row += 1;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const material = new THREE.MeshStandardMaterial({ color: '#667758', roughness: 1, side: THREE.DoubleSide });
+    this.routeGround = new THREE.Mesh(geometry, material);
+    this.routeGround.name = 'SLOPE_ROUTE_GROUND_CONTINUITY';
+    this.routeGround.renderOrder = -8;
+    this.routeRoot.add(this.routeGround);
   }
 
   setScenario(scenario) {

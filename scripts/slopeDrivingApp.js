@@ -419,14 +419,13 @@ function openBriefing(id) {
   pendingScenarioId = scenario.id;
   $('#briefing-title').textContent = scenario.title;
   $('#briefing-meta').innerHTML = [
-    ['编组', scenario.consist],
+    ['机车', 'HXD1C'],
+    ['编组', scenario.id === 'uphill' ? '约2800 t货车' : '约4200 t货车'],
     ['列车管定压', `${scenario.nominalPipePressure} kPa`],
-    ['线路', scenario.routeLabel],
-    ['天气/黏着', scenario.weather],
+    ['核心坡度', scenario.id === 'uphill' ? '+12‰' : '-13‰'],
+    ['限速', scenario.id === 'uphill' ? '70 km/h' : '70→55 km/h'],
+    ['天气', scenario.weather],
   ].map(([key, value]) => `<div><span>${key}</span><b>${value}</b></div>`).join('');
-  $('#briefing-physics').innerHTML = `<b>核心策略：</b>${scenario.id === 'uphill' ? '先闯后爬、趋势控制、坡顶预判。' : '提前预控、动力为主、空气为辅、先缓解空气后完成充风。'}`;
-  $('#notch-reference').innerHTML = `<b>牵引主手柄给定</b><span>牵引区1—12级对应10—120 km/h参考目标，6级为60 km/h。实际速度仍受坡度、载重、黏着和牵引能力限制。</span>`;
-  $('#briefing-scores').innerHTML = scenario.briefingSteps.map((step, index) => `<li><b>${index + 1}. ${step}</b></li>`).join('');
   $('#skill-picker').classList.remove('open');
   $('#briefing-modal').classList.add('open');
   $('#briefing-modal').setAttribute('aria-hidden', 'false');
@@ -497,9 +496,6 @@ function render() {
   renderProgress(progress);
   renderData(s);
   renderSlopeProfile(s);
-  $('#mobile-auto').textContent = BRAKE_POSITIONS[s.autoBrake]?.label || '—';
-  $('#mobile-independent').textContent = INDEPENDENT_BRAKE_POSITIONS[s.independentBrake] || '—';
-  $('#mobile-traction').textContent = s.traction > 0 ? `${s.traction}级/${s.tractionTargetSpeed}` : s.traction < 0 ? `电制${Math.abs(s.traction)}级` : '零位';
   $('#sand').classList.toggle('active', s.sandRemaining > 0);
   $('#adhesion-state').textContent = s.wheelSlip ? '空转' : s.sandRemaining > 0 ? '撒砂中' : '黏着正常';
   $('#adhesion-state').classList.toggle('danger', s.wheelSlip);
@@ -509,7 +505,7 @@ function render() {
   const shockLabel = s.shockIndex >= 72 ? '明显' : s.shockIndex >= 42 ? '可感' : '低';
   $('#shock-state').textContent = `${shockLabel} ${s.shockIndex.toFixed(0)}`;
   $('#shock-state').className = s.shockIndex >= 72 ? 'danger' : s.shockIndex >= 42 ? 'warning' : '';
-  $('#shock-stick').style.setProperty('--shock-stick-angle', `${s.shockStickTilt.toFixed(1)}deg`);
+  $('#shock-stick').dataset.level = String(Math.min(6, Math.ceil(s.shockStickTilt / 15)));
   $('#shock-stick').classList.toggle('fallen', s.shockStickTilt >= 70);
   const shake = Math.min(3.2, Math.max(0, s.shockIndex - 34) / 18);
   const shakePhase = s.elapsed * 34;
@@ -648,19 +644,6 @@ async function exitImmersive() {
 }
 
 function setupMobileControls() {
-  document.querySelectorAll('[data-control][data-delta]').forEach((button) => button.addEventListener('click', () => {
-    adjustControl(button.dataset.control, Number(button.dataset.delta));
-  }));
-  const release = $('#mobile-side-release');
-  const startRelease = (event) => {
-    event.preventDefault();
-    sideReleasePointerId = event.pointerId;
-    release.setPointerCapture?.(event.pointerId);
-    simulation.command('side-release', true);
-  };
-  release.addEventListener('pointerdown', startRelease);
-  release.addEventListener('pointerup', stopSideRelease);
-  release.addEventListener('pointercancel', stopSideRelease);
   $('#enter-training').addEventListener('click', async () => {
     await enterImmersive();
   });

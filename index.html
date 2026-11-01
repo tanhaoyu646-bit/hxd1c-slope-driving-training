@@ -6,14 +6,13 @@
   <meta name="theme-color" content="#06131d">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23061925'/%3E%3Cpath d='M8 43L25 25l11 10 20-22M10 48h44' stroke='%2358d7ff' stroke-width='5' fill='none'/%3E%3C/svg%3E">
   <title>HXD1C 坡道驾驶与调速实操考评</title>
-  <link rel="stylesheet" href="./styles/slope-driving.css?rev=slope-v2">
+  <link rel="stylesheet" href="./styles/slope-driving.css?rev=slope-v2-1">
 </head>
 <body class="candidate-entry-active">
   <section id="candidate-gate" class="candidate-gate" role="dialog" aria-modal="true" aria-labelledby="candidate-title">
     <form id="candidate-form" class="candidate-card" novalidate>
       <div class="candidate-eyebrow">HXD1C · 独立课堂考核</div>
       <h1 id="candidate-title">坡道驾驶与调速考评</h1>
-      <p class="candidate-intro">请先登记考生信息。线路、驾驶台和考核资源正在后台准备，资源完成后方可进入项目选择。</p>
       <div class="candidate-fields">
         <label><span>姓名</span><input id="candidate-name" name="candidateName" type="text" maxlength="20" autocomplete="name" enterkeyhint="next" placeholder="请输入姓名"></label>
         <label><span>学号</span><input id="candidate-student-id" name="candidateStudentId" type="text" maxlength="20" autocomplete="off" inputmode="text" enterkeyhint="done" placeholder="请输入学号"></label>
@@ -24,7 +23,6 @@
         <progress id="candidate-load-progress" max="100" value="5">5%</progress>
       </div>
       <button id="candidate-submit" class="candidate-submit" type="submit" disabled>资源加载中</button>
-      <small>信息仅保存在当前浏览器标签页，不会上传到服务器；重新开始或切换坡道项目时保留当前考生信息。</small>
     </form>
   </section>
 
@@ -60,19 +58,17 @@
       </section>
 
       <button type="button" id="shock-stick" class="shock-stick" aria-label="扶正冲动棒">
-        <span></span><i></i><em>冲动棒</em>
+        <span class="shock-rack" aria-hidden="true">
+          <i class="rack-back"></i>
+          <b></b><b></b><b></b><b></b><b></b><b></b>
+          <i class="rack-slots"></i><i class="rack-front"></i>
+        </span>
+        <em>冲动棒</em>
       </button>
 
       <div id="status-strip" class="status-strip" aria-live="polite">
         <b id="skill-name">坡道驾驶</b><span id="phase-name">准备开始</span><em id="status-message">仅考评模式</em>
       </div>
-
-      <nav id="mobile-controls" class="mobile-controls" aria-label="手机驾驶操纵">
-        <div><span>自阀</span><button type="button" data-control="auto" data-delta="-1">−</button><b id="mobile-auto">运转位</b><button type="button" data-control="auto" data-delta="1">＋</button></div>
-        <div><span>单阀</span><button type="button" data-control="independent" data-delta="-1">−</button><b id="mobile-independent">运转位</b><button type="button" data-control="independent" data-delta="1">＋</button></div>
-        <div><span>主手柄</span><button type="button" data-control="traction" data-delta="-1">−</button><b id="mobile-traction">零位</b><button type="button" data-control="traction" data-delta="1">＋</button></div>
-        <button type="button" id="mobile-side-release" class="mobile-side-release">按住单缓</button>
-      </nav>
 
       <section id="lkj-dock" class="lkj-dock" aria-hidden="true">
         <button type="button" class="lkj-close" data-lkj-close aria-label="关闭LKJ放大界面">×</button>
@@ -95,28 +91,19 @@
 
       <section id="skill-picker" class="modal open">
         <div class="picker-card">
-          <span class="eyebrow">HXD1C · 货物列车坡道操纵</span>
           <h1>坡道驾驶与调速考评</h1>
-          <p>请选择独立考评项目。两项考评分别创建运行状态，不读取或写入其他训练项目。</p>
           <div class="skill-grid">
-            <button type="button" data-scenario="uphill"><b>长大上坡道驾驶与调速</b><span>约 2800 t · +12‰核心坡段 · 坡前储能、坡中牵引、坡顶预判</span><em>查看任务与评分</em></button>
-            <button type="button" data-scenario="downhill"><b>长大下坡道调速与制动</b><span>约 4200 t · -13‰连续6 km · 动力制动、空气补充、缓解充风</span><em>查看任务与评分</em></button>
+            <button type="button" data-scenario="uphill"><b>长大上坡道驾驶与调速</b></button>
+            <button type="button" data-scenario="downhill"><b>长大下坡道调速与制动</b></button>
           </div>
-          <small>独立教学仿真项目；正式操纵标准仍以本线路操纵示意图、机务段细则和当次行车条件为准。</small>
         </div>
       </section>
 
       <section id="briefing-modal" class="modal" aria-hidden="true">
         <div class="briefing-card">
-          <span class="eyebrow">任务书 · 开始前必读</span>
           <h2 id="briefing-title">考评任务</h2>
           <div id="briefing-meta" class="briefing-meta"></div>
-          <p id="briefing-physics" class="briefing-physics"></p>
-          <div id="notch-reference" class="notch-reference"></div>
-          <h3>核心操纵主线</h3>
-          <ol id="briefing-scores" class="briefing-scores"></ol>
-          <p class="briefing-note">目标不是逐字照抄固定步骤，而是在规定时机、速度带和设备逻辑内完成操纵。安全红线会把总分封顶为 59 分。</p>
-          <div class="result-actions"><button type="button" id="briefing-back">返回选择</button><button type="button" id="briefing-start" class="primary">我已了解，开始考评</button></div>
+          <div class="result-actions"><button type="button" id="briefing-back">返回选择</button><button type="button" id="briefing-start" class="primary">开始考评</button></div>
         </div>
       </section>
 
@@ -139,6 +126,6 @@
   <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog" inert>
     <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
   </section>
-  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2"></script>
+  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2-1"></script>
 </body>
 </html>

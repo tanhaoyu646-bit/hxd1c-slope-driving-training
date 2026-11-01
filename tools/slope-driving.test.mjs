@@ -79,7 +79,10 @@ test('项目包含独立上坡和下坡配置以及真实坡度区段', () => {
   assert.equal(gradeAt(SCENARIOS.downhill, 3000), -13);
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8199), 70);
   assert.equal(lineLimitAt(SCENARIOS.downhill, 8200), 55);
-  assert.equal(SCENARIOS.downhill.nominalPipePressure, 500);
+  assert.equal(SCENARIOS.uphill.nominalPipePressure, 600);
+  assert.equal(SCENARIOS.downhill.nominalPipePressure, 600);
+  assert.equal(SCENARIOS.uphill.startOffset, 0);
+  assert.equal(SCENARIOS.downhill.startOffset, 0);
   assert.equal(SCENARIOS.uphill.assessmentItems.length, 7);
   assert.equal(SCENARIOS.downhill.assessmentItems.reduce((sum, item) => sum + item.points, 0), 100);
 });
@@ -244,4 +247,22 @@ test('手机登录提交直接调用沉浸全屏流程并保留CSS兜底', () =>
   assert.match(app, /screen\.orientation\?\.lock\?\.\('landscape'\)/);
   assert.match(app, /visualViewport/);
   assert.match(css, /html\.immersive/);
+});
+
+test('简化手机入口并只保留驾驶台实体手柄操作', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /请选择独立考评项目/);
+  assert.doesNotMatch(html, /独立教学仿真项目/);
+  assert.doesNotMatch(html, /id="mobile-controls"/);
+  assert.doesNotMatch(html, /briefing-physics|notch-reference|briefing-scores/);
+  assert.match(html, /class="shock-rack"/);
+});
+
+test('LKJ在左上角打开，限速线为红色且运行线为绿色', () => {
+  const css = readFileSync(new URL('../styles/slope-driving.css', import.meta.url), 'utf8');
+  const lkj = readFileSync(new URL('../scripts/slopeLkjRuntime.js', import.meta.url), 'utf8');
+  assert.match(css, /body\.mobile-controls-enabled \.lkj-dock\{top:max\(5px/);
+  assert.match(css, /native-chart \.limit\{stroke:#ff3247/);
+  assert.match(css, /native-chart \.speed\{stroke:#24ee67/);
+  assert.match(lkj, /native-route-profile/);
 });
