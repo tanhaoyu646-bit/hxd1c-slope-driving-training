@@ -1,11 +1,13 @@
-import { LKJ_KEYS } from './slopeDrivingConfig.js';
+import { BRAKE_POSITIONS, LKJ_KEYS } from './slopeDrivingConfig.js';
 
 const pct = (value, total) => `${value / total * 100}%`;
 const fmt = (value, digits = 0) => Number(value || 0).toFixed(digits);
+const FACE_ROOT = './assets/lkj/native-states/';
 
 const MENU = Object.freeze([
-  ['condition', '工况显示'], ['current', '当前揭示'], ['equipment', '设备状态'],
-  ['parameters', '设定参数'], ['records', '运行记录'], ['return', '返回监控'],
+  ['current', '当前揭示'], ['condition', '工况显示'], ['all', '全部揭示'],
+  ['equipment', '设备状态'], ['parameters', '设定参数'], ['records', '运行记录'],
+  ['return', '返回监控'],
 ]);
 
 export class SlopeLkjRuntime {
@@ -13,6 +15,7 @@ export class SlopeLkjRuntime {
     this.root = root;
     this.simulation = simulation;
     this.screen = root.querySelector('.lkj-screen');
+    this.face = root.querySelector('[data-lkj-face]');
     this.page = 'main';
     this.menuIndex = 0;
     this.notice = '';
@@ -40,6 +43,7 @@ export class SlopeLkjRuntime {
     this.open = true;
     this.root.classList.add('open');
     this.root.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('device-panel-active');
     this.simulation.command('lkj-open');
     this.render();
   }
@@ -48,13 +52,14 @@ export class SlopeLkjRuntime {
     this.open = false;
     this.root.classList.remove('open');
     this.root.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('device-panel-active');
   }
 
   handleKey(id) {
     if (id === 'alarm') { this.simulation.command('lkj-ack'); this.flash('警惕报警已确认'); return; }
     if (id === 'relief') {
       this.simulation.command('lkj-relief');
-      this.flash(this.simulation.state.lkjForcedBrake ? '速度未降至允许值，缓解无效' : '制动指令已缓解');
+      this.flash(this.simulation.state.lkjForcedBrake ? '速度未降至允许值，缓解无效' : '制动输出已缓解');
       return;
     }
     if (id === 'query') { this.page = 'menu'; this.menuIndex = 0; this.render(); return; }
@@ -79,68 +84,85 @@ export class SlopeLkjRuntime {
     this.notice = message;
     this.render();
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = setTimeout(() => { this.notice = ''; this.render(); }, 1300);
+    this.noticeTimer = setTimeout(() => { this.notice = ''; this.render(); }, 1500);
+  }
+
+  setFace(file) {
+    if (!this.face.src.endsWith(file)) this.face.src = `${FACE_ROOT}${file}`;
   }
 
   render() {
-    const s = this.simulation.state;
+    const state = this.simulation.state;
     const scenario = this.simulation.scenario;
-    if (this.page === 'menu') {
-      this.screen.innerHTML = `<div class="lkj-page"><header>查询选择</header><ol>${MENU.map(([id, label], index) => `<li class="${index === this.menuIndex ? 'selected' : ''}"><span>${index + 1}</span>${label}<em>${id === 'records' ? s.events.length : ''}</em></li>`).join('')}</ol><footer>↑↓选择　确认进入　←返回</footer></div>`;
-    } else if (this.page === 'condition') {
-      this.screen.innerHTML = this.detailPage('工况显示', [
-        ['速度', `${fmt(s.speed, 1)} km/h`], ['坡度', `${s.grade >= 0 ? '+' : ''}${fmt(s.grade, 1)}‰`],
-        ['牵引/电制', `${s.traction} 级`], ['自阀', `${s.autoBrake} 位`],
-        ['首部管压', `${fmt(s.trainPipe)} kPa`], ['尾部管压', `${fmt(s.tailPipe)} kPa`],
-      ]);
-    } else if (this.page === 'equipment') {
-      this.screen.innerHTML = this.detailPage('设备状态', [
-        ['主机', '正常'], ['速度通道', '正常'], ['压力通道', '正常'], ['信号通道', '正常'],
-        ['动力制动', '正常'], ['制动接口', s.lkjForcedBrake ? '输出中' : '正常'],
-      ]);
-    } else if (this.page === 'parameters') {
-      this.screen.innerHTML = this.detailPage('设定参数（本考评锁定）', [
-        ['车型', 'HXD1C'], ['列车类型', scenario.trainType], ['列车质量', `${fmt(scenario.totalMassKg / 1000)} t`],
-        ['本/补', '本务'], ['线路号', '坡道教学线'], ['管压', `${scenario.nominalPipePressure} kPa`],
-      ]);
-    } else if (this.page === 'current') {
-      this.screen.innerHTML = this.detailPage('当前揭示', [
-        ['当前区段', s.phase.label], ['当前坡度', `${s.grade >= 0 ? '+' : ''}${fmt(s.grade, 1)}‰`],
-        ['线路限速', `${s.lineLimit} km/h`], ['控制速度', `${fmt(s.lkjLimit)} km/h`],
-        ['目标速度带', `${s.targetBand[0]}—${s.targetBand[1]} km/h`], ['临时限速', scenario.id === 'downhill' ? '8.2 km起 55 km/h' : '无'],
-      ]);
-    } else if (this.page === 'records') {
-      const records = s.events.slice(-6).reverse().map((event) => `<li><span>${this.eventLabel(event.type)}</span><b>${fmt(event.elapsed)}s</b><em>${fmt(event.speed)} km/h</em></li>`).join('') || '<li>暂无记录</li>';
-      this.screen.innerHTML = `<div class="lkj-page records"><header>运行记录</header><ul>${records}</ul><footer>←返回　转储键刷新</footer></div>`;
-    } else this.screen.innerHTML = this.mainPage(s, scenario);
+    if (this.page === 'main') {
+      this.setFace('main-blank.png');
+      this.screen.innerHTML = this.mainOverlay(state, scenario);
+    } else if (this.page === 'menu') {
+      this.setFace('query-menu.png');
+      this.screen.innerHTML = this.menuOverlay();
+    } else if (this.page === 'current' || this.page === 'all') {
+      this.setFace('current-reveal.png');
+      this.screen.innerHTML = this.revealOverlay(state, scenario);
+    } else {
+      this.setFace('main-blank.png');
+      this.screen.innerHTML = this.detailOverlay(state, scenario);
+    }
     if (this.notice) this.screen.insertAdjacentHTML('beforeend', `<div class="lkj-notice">${this.notice}</div>`);
   }
 
-  mainPage(s, scenario) {
-    const width = 620;
-    const height = 148;
-    const samples = s.samples.slice(-120);
-    const maxDistance = Math.max(1, ...samples.map((sample) => sample.distance));
-    const startDistance = Math.max(0, maxDistance - 3000);
-    const span = Math.max(800, maxDistance - startDistance);
-    const speedPoints = samples.map((sample) => `${((sample.distance - startDistance) / span) * width},${height - sample.speed / 90 * height}`).join(' ');
-    const limitPoints = samples.map((sample) => `${((sample.distance - startDistance) / span) * width},${height - sample.limit / 90 * height}`).join(' ');
-    const levelLabels = { normal: '监控', warning: '报警', unload: '卸载', service: '常用制动', emergency: '紧急制动' };
-    return `<div class="lkj-main level-${s.lkjLevel}">
-      <div class="lkj-top"><b>${fmt(s.speed)}</b><span>km/h</span><strong>${fmt(s.lkjLimit)}</strong><small>限速</small><em>${levelLabels[s.lkjLevel]}</em></div>
-      <div class="lkj-meta"><span>${s.grade >= 0 ? '+' : ''}${fmt(s.grade, 1)}‰</span><span>${s.phase.label}</span><span>余 ${fmt(Math.max(0, scenario.finishDistance - s.distance))}m</span><span>尾压 ${fmt(s.tailPipe)}kPa</span></div>
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-label="速度曲线"><g class="grid"><path d="M0 42H620M0 84H620M0 126H620"/></g><polyline class="limit" points="${limitPoints}"/><polyline class="speed" points="${speedPoints}"/></svg>
-      <div class="lkj-bottom"><span>${scenario.routeLabel}</span><span>${fmt(s.distance / 1000, 2)} km</span><span>${new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span></div>
+  mainOverlay(state, scenario) {
+    const width = 710;
+    const height = 320;
+    const samples = state.samples.slice(-180);
+    const maximum = Math.max(1, ...samples.map((sample) => sample.distance));
+    const start = Math.max(0, maximum - 3000);
+    const span = Math.max(800, maximum - start);
+    const speedPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.speed / 120 * height}`).join(' ');
+    const limitPoints = samples.map((sample) => `${((sample.distance - start) / span) * width},${height - sample.limit / 120 * height}`).join(' ');
+    return `<div class="lkj-native-main level-${state.lkjLevel}">
+      <b class="native-speed">${fmt(state.speed)}</b><b class="native-limit">${fmt(state.lkjLimit)}</b><b class="native-distance">${fmt(Math.max(0, scenario.finishDistance - state.distance))}</b>
+      <span class="native-signal">预告</span><span class="native-km">${fmt(state.distance / 1000, 3)}</span><span class="native-clock">${new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span>
+      <svg class="native-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><polyline class="limit" points="${limitPoints}"/><polyline class="speed" points="${speedPoints}"/></svg>
+      <div class="native-status">${state.phase.label}　${state.grade >= 0 ? '+' : ''}${fmt(state.grade, 1)}‰　尾压${fmt(state.tailPipe)}kPa</div>
     </div>`;
   }
 
-  detailPage(title, rows) {
-    return `<div class="lkj-page"><header>${title}</header><dl>${rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('')}</dl><footer>查询：菜单　←：返回</footer></div>`;
+  menuOverlay() {
+    const row = Math.floor(this.menuIndex / 2);
+    const column = this.menuIndex % 2;
+    return `<div class="lkj-menu-cursor" style="--menu-row:${row};--menu-column:${column}">${MENU[this.menuIndex][1]}</div>`;
+  }
+
+  revealOverlay(state, scenario) {
+    const restriction = scenario.id === 'downhill' ? '8.2 km起限55 km/h' : '无临时限速';
+    return `<div class="lkj-reveal-row"><span>1</span><b>${scenario.routeLabel}</b><em>${state.phase.label}　${restriction}　控速${fmt(state.lkjLimit)} km/h</em></div>`;
+  }
+
+  detailOverlay(state, scenario) {
+    let title = '工况显示';
+    let rows = [
+      ['速度', `${fmt(state.speed, 1)} km/h`], ['坡度', `${state.grade >= 0 ? '+' : ''}${fmt(state.grade, 1)}‰`],
+      ['牵引/电制', `${state.traction} 级`], ['牵引给定', `${state.tractionTargetSpeed || 0} km/h`],
+      ['自阀', BRAKE_POSITIONS[state.autoBrake]?.label || '—'], ['列车管', `${fmt(state.trainPipe)} kPa`],
+    ];
+    if (this.page === 'equipment') {
+      title = '设备状态';
+      rows = [['LKJ主机', '正常'], ['速度通道', '正常'], ['压力通道', '正常'], ['信号通道', '正常'], ['记录单元', '正常'], ['制动接口', state.lkjForcedBrake ? '输出中' : '正常']];
+    }
+    if (this.page === 'parameters') {
+      title = '设定参数（考评锁定）';
+      rows = [['机车', 'HXD1C'], ['车次', '46125'], ['列车类型', scenario.trainType], ['总重', `${fmt(scenario.totalMassKg / 1000)} t`], ['辆数', scenario.id === 'uphill' ? '35' : '53'], ['列车管定压', `${scenario.nominalPipePressure} kPa`]];
+    }
+    if (this.page === 'records') {
+      title = '运行记录';
+      rows = state.events.slice(-8).reverse().map((event) => [this.eventLabel(event.type), `${fmt(event.elapsed)}s / ${fmt(event.speed)}km/h`]);
+    }
+    return `<div class="lkj-native-detail"><header>${title}</header><dl>${rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('')}</dl><footer>查询键返回菜单　←返回</footer></div>`;
   }
 
   eventLabel(type) {
     return ({
-      'attempt-start': '考评开始', 'auto-brake': '自阀操作', traction: '牵引/电制操作',
+      'attempt-start': '考评开始', 'auto-brake': '自阀操作', traction: '主手柄操作',
       callout: '呼唤确认', 'tail-query': '列尾查询', sand: '撒砂', 'lkj-level': '监控状态',
       'phase-enter': '进入新区段', 'recharge-ready': '充风完成', 'lkj-ack': '警惕确认',
     })[type] || type;

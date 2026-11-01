@@ -1,5 +1,9 @@
+html,
 body
 {
+    width: 100%;
+    height: 100%;
+    margin: 0;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -11,6 +15,8 @@ body
 
 .mmi-body
 {
+    width: 918px !important;
+    height: 600px !important;
     display: flex;
     justify-content: flex-start;
     flex-wrap: wrap;

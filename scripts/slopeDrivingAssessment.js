@@ -13,31 +13,46 @@ export class SlopeDrivingAssessment {
     const events = state.events;
     const samples = state.samples;
     const uphill = this.simulation.scenario.id === 'uphill';
-    const checks = uphill ? [
-      events.some((item) => item.type === 'lkj-open')
-        && events.some((item) => item.type === 'tail-query')
-        && events.some((item) => item.type === 'callout'),
+    const rawChecks = uphill ? [
+      events.some((item) => item.type === 'lkj-open' && item.distance < 1500)
+        && events.some((item) => item.type === 'tail-query' && item.distance < 1500)
+        && events.some((item) => item.type === 'callout' && item.distance < 1500),
       state.distance >= 1500 && samples.filter((item) => item.distance < 1500 && item.speed >= 63).length >= 5,
       state.distance >= 2500 && events.some((item) => item.type === 'traction' && item.distance < 2700 && item.value >= 4),
-      state.distance >= 8000 && samplesBetween(samples, 2500, 8000).some((item) => between(item.speed, 40, 62)),
+      state.distance >= 3300 && samplesBetween(samples, 2500, state.distance).filter((item) => between(item.speed, 40, 62)).length >= 5,
       state.distance >= 3900 && state.slipDuration <= 6,
       state.distance >= 8600 && events.some((item) => item.type === 'traction' && between(item.distance, 7600, 8600) && item.value <= 3),
       state.completed,
     ] : [
-      events.some((item) => item.type === 'lkj-open')
+      events.some((item) => item.type === 'lkj-open' && item.distance < 1200)
         && events.some((item) => item.type === 'tail-query' && item.distance < 1200)
-        && events.some((item) => item.type === 'callout'),
+        && events.some((item) => item.type === 'callout' && item.distance < 1200),
       state.distance >= 2200 && events.some((item) => item.type === 'traction' && item.value < 0 && item.distance < 2200),
-      state.distance >= 8200 && samplesBetween(samples, 2200, 8200).some((item) => between(item.speed, 48, 60)),
-      events.some((item) => item.type === 'auto-brake' && item.value > 0),
-      events.some((item) => item.type === 'recharge-ready' && item.distance > 2200),
+      state.distance >= 3500 && samplesBetween(samples, 2200, state.distance).filter((item) => between(item.speed, 48, 60)).length >= 5,
+      events.some((item) => item.type === 'auto-brake' && item.value > 0 && item.distance >= 2200),
+      events.some((item) => item.type === 'recharge-ready' && item.distance > 2200)
+        && events.some((item) => item.type === 'auto-brake' && item.value === 0 && item.previous?.autoBrake > 0),
       state.distance >= 8200 && samples.filter((item) => item.distance < 8200).at(-1)?.speed <= 55,
       state.completed,
     ];
+    const checks = [];
+    let sequenceOpen = true;
+    for (const check of rawChecks) {
+      const done = sequenceOpen && Boolean(check);
+      checks.push(done);
+      if (!done) sequenceOpen = false;
+    }
+    const currentIndex = checks.findIndex((item) => !item);
+    const statuses = checks.map((done, index) => (
+      done ? 'done' : index === currentIndex ? 'active' : 'locked'
+    ));
     return {
       done: checks.filter(Boolean).length,
       total: checks.length,
       checks,
+      rawChecks,
+      statuses,
+      currentIndex,
       items: this.simulation.scenario.assessmentItems,
     };
   }
@@ -51,6 +66,7 @@ export class SlopeDrivingAssessment {
   commonRedlines(state) {
     return state.events.filter((event) => (
       event.type === 'slope-stall'
+      || event.type === 'manual-emergency-brake'
       || (event.type === 'lkj-level' && ['service', 'emergency'].includes(event.to))
       || event.type === 'direction-while-moving'
     ));
@@ -82,7 +98,7 @@ export class SlopeDrivingAssessment {
     let entry = 15;
     if (!events.some((event) => event.type === 'traction' && event.distance < 2700 && event.value >= 4)) entry -= 6;
     if (events.some((event) => event.type === 'traction' && between(event.distance, 1200, 2700) && eventJump(event, 'traction') > 2)) entry -= 5;
-    if (Math.min(state.speed, ...entrySamples.map((sample) => sample.speed)) < 52 || state.maxShockIndex > 72) entry -= 4;
+    if (!entrySamples.length || Math.min(...entrySamples.map((sample) => sample.speed)) < 52 || state.maxShockIndex > 72) entry -= 4;
     categories.push(category('入坡稳牵引', entry, 15, '先闯后爬但不猛推，允许速度自然回落'));
 
     const climbSamples = samplesBetween(samples, 2500, 8000);
@@ -90,7 +106,7 @@ export class SlopeDrivingAssessment {
       ? climbSamples.filter((sample) => !between(sample.speed, 40, 62)).length / climbSamples.length
       : 1;
     let climb = 20;
-    if (Math.min(state.speed, ...climbSamples.map((sample) => sample.speed)) < 38) climb -= 8;
+    if (!climbSamples.length || Math.min(...climbSamples.map((sample) => sample.speed)) < 38) climb -= 8;
     if (outsideClimbRatio > .35) climb -= 6;
     if (state.tractionThermal > 35) climb -= 6;
     categories.push(category('持续爬坡', climb, 20, '40—62 km/h速度带内管理牵引与温升'));

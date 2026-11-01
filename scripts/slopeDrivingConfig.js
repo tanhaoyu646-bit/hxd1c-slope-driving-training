@@ -2,24 +2,40 @@ export const PROJECT_ID = 'hxd1c-slope-driving-training-v1';
 
 export const CAB = Object.freeze({ width: 640, height: 480 });
 
-// 原 HXD1C 驾驶台 CVF 贴图并非按 0—5 连续排列自阀位置。
-// 前三帧位于第一行，后三帧位于最后一行。
-export const AUTO_BRAKE_SPRITE_FRAMES = Object.freeze([0, 1, 2, 9, 10, 11]);
+// 原 HXD1C 驾驶台 CVF 贴图共 12 帧，对应手柄从运转位到紧急位的连续行程。
+// 自阀逻辑保留运转、初制、常用制动区、全制动、抑制、重联和紧急功能；
+// 不设置“快速缓解位”。
+export const AUTO_BRAKE_SPRITE_FRAMES = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+
+export const INDEPENDENT_BRAKE_MAX = 11;
 
 export const INDEPENDENT_BRAKE_POSITIONS = Object.freeze([
-  '缓解位', '制动Ⅰ', '制动Ⅱ', '制动Ⅲ', '制动Ⅳ', '全制动位',
+  '运转位', '制动区 10%', '制动区 20%', '制动区 30%', '制动区 40%', '制动区 50%',
+  '制动区 60%', '制动区 70%', '制动区 80%', '制动区 90%', '制动区 100%', '全制动位',
 ]);
 
 export const DIRECTION_POSITIONS = Object.freeze(['F', 'N', 'R']);
 
 export const BRAKE_POSITIONS = Object.freeze([
-  { value: 0, label: '运转位', reduction: 0 },
-  { value: 1, label: '初制位', reduction: 50 },
-  { value: 2, label: '常用Ⅱ', reduction: 90 },
-  { value: 3, label: '常用Ⅲ', reduction: 130 },
-  { value: 4, label: '常用Ⅳ', reduction: 170 },
-  { value: 5, label: '紧急位', reduction: 600 },
+  { value: 0, label: '运转位', reduction: 0, function: '充风并缓解列车制动' },
+  { value: 1, label: '初制动位', reduction: 50, function: '最小有效减压' },
+  { value: 2, label: '常用制动区 1', reduction: 70, function: '常用制动区' },
+  { value: 3, label: '常用制动区 2', reduction: 90, function: '常用制动区' },
+  { value: 4, label: '常用制动区 3', reduction: 110, function: '常用制动区' },
+  { value: 5, label: '常用制动区 4', reduction: 130, function: '常用制动区' },
+  { value: 6, label: '常用制动区 5', reduction: 145, function: '常用制动区' },
+  { value: 7, label: '常用制动区 6', reduction: 160, function: '常用制动区' },
+  { value: 8, label: '全制动位', reduction: 170, function: '最大有效减压' },
+  { value: 9, label: '抑制位', reduction: 170, function: '全制动并复位惩罚制动' },
+  { value: 10, label: '重联位', reduction: 0, function: '非操纵端或无火回送使用' },
+  { value: 11, label: '紧急制动位', reduction: 600, function: '列车管紧急排风' },
 ]);
+
+export const TRACTION_TARGET_SPEEDS = Object.freeze([0, 10, 20, 30, 40, 50, 60, 70]);
+
+export function tractionTargetSpeed(notch) {
+  return TRACTION_TARGET_SPEEDS[Math.max(0, Math.min(7, Math.round(Number(notch) || 0)))] || 0;
+}
 
 const uphillProfile = Object.freeze([
   { id: 'approach', start: 0, end: 1500, gradeStart: 0, gradeEnd: 2, label: '坡前闯坡准备区', targetMin: 63, targetMax: 70 },

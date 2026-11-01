@@ -1,26 +1,30 @@
 import {
   AUTO_BRAKE_SPRITE_FRAMES,
+  BRAKE_POSITIONS,
   CAB,
   DIRECTION_POSITIONS,
+  INDEPENDENT_BRAKE_MAX,
   INDEPENDENT_BRAKE_POSITIONS,
   PROJECT_ID,
+  TRACTION_TARGET_SPEEDS,
   getScenario,
 } from './slopeDrivingConfig.js';
 import { SlopeDrivingSimulation } from './slopeDrivingSimulation.js';
 import { SlopeDrivingAssessment } from './slopeDrivingAssessment.js';
 import { SlopeDrivingScene } from './slopeDrivingScene.js';
 import { SlopeLkjRuntime } from './slopeLkjRuntime.js';
+import { SlopeCirRuntime } from './slopeCirRuntime.js';
 
 const $ = (selector) => document.querySelector(selector);
 const pct = (value, total) => `${value / total * 100}%`;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const views = { front: 'HXD1C_front.png', left: 'HXD1C_left_full.png', right: 'HXD1C_right_full.png', rearLeft: 'HXD1C_left.png', rearRight: 'HXD1C_right.png' };
-const brakeNames = ['运转位', '初制位', '常用Ⅱ', '常用Ⅲ', '常用Ⅳ', '紧急位'];
 
 let simulation = new SlopeDrivingSimulation('uphill');
 let assessment = new SlopeDrivingAssessment(simulation);
 let routeScene = null;
 let lkj = new SlopeLkjRuntime($('#lkj-dock'), simulation);
+let cir = new SlopeCirRuntime($('#cir-dock'), simulation);
 let selectedView = 'front';
 let lastFrame = performance.now();
 let resultShown = false;
@@ -31,6 +35,7 @@ let lastAlertLevel = 'normal';
 let cabNotice = '';
 let cabNoticeUntil = 0;
 let hornPointerId = null;
+let sideReleasePointerId = null;
 let pendingScenarioId = 'uphill';
 const overlay = $('#cab-overlay');
 const elements = {};
@@ -146,13 +151,17 @@ function createCabControls() {
   elements.independentBadge = makeBadge('单阀', 116, 311, 78);
   elements.tractionBadge = makeBadge('牵引/电制', 433, 315, 96);
   elements.directionBadge = makeBadge('换向手柄', 521, 331, 88);
-  elements.sideRelease = makePhysical('单阀侧压：单独缓解机车制动缸', 116, 405, 82, 27, () => {
-    const next = !simulation.state.sideRelease;
-    simulation.command('side-release', next);
-    showCabNotice(next ? '单阀侧压：机车制动缸单独缓解' : '单阀侧压已释放');
-  }, 'side-release-control');
-  elements.sideRelease.innerHTML = '<b>单阀侧压</b><span>未动作</span>';
-  makePhysical('放大LKJ监控装置', 210, 226, 101, 94, () => lkj.show(), 'lkj-hotspot');
+  elements.sideRelease = makePhysical('单阀侧压：按住时单独缓解机车制动缸', 116, 405, 82, 27, null, 'side-release-control');
+  elements.sideRelease.innerHTML = '<b>单缓按钮</b><span>按住动作</span>';
+  elements.sideRelease.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    sideReleasePointerId = event.pointerId;
+    elements.sideRelease.setPointerCapture?.(event.pointerId);
+    simulation.command('side-release', true);
+    showCabNotice('单缓已按下：机车制动缸单独缓解');
+  });
+  makePhysical('放大LKJ监控装置', 210, 226, 101, 94, () => { cir.close(); lkj.show(); }, 'lkj-hotspot');
+  makePhysical('打开CIR机车综合无线通信设备', 606, 276, 34, 118, () => { lkj.close(); cir.show(); }, 'cir-hotspot');
   makePhysical('警惕／复位', 386, 312, 32, 32, () => {
     simulation.command('lkj-ack');
     showCabNotice('警惕／复位已确认');
@@ -185,8 +194,8 @@ function createCabControls() {
   elements.clockDigital = makeDigital('clock-digital', 230, 268, 45, 10, 'clock');
 
   const controls = [
-    ['auto', elements.auto, 0, 5, 13],
-    ['independent', elements.independent, 0, 5, 13],
+    ['auto', elements.auto, 0, AUTO_BRAKE_SPRITE_FRAMES.length - 1, 7],
+    ['independent', elements.independent, 0, INDEPENDENT_BRAKE_MAX, 7],
     ['traction', elements.traction, -8, 7, 19],
   ];
   for (const [id, sprite, min, max, step] of controls) {
@@ -224,7 +233,7 @@ function adjustControl(id, delta) {
   const stateKey = id === 'auto' ? 'autoBrake' : id === 'independent' ? 'independentBrake' : 'traction';
   const type = id === 'auto' ? 'auto-brake' : id === 'independent' ? 'independent-brake' : 'traction';
   const min = id === 'traction' ? -8 : 0;
-  const max = id === 'traction' ? 7 : 5;
+  const max = id === 'traction' ? 7 : id === 'auto' ? AUTO_BRAKE_SPRITE_FRAMES.length - 1 : INDEPENDENT_BRAKE_MAX;
   simulation.command(type, clamp(simulation.state[stateKey] + delta, min, max));
 }
 
@@ -244,6 +253,14 @@ function stopHorn(event) {
   simulation.command('horn-stop');
 }
 
+function stopSideRelease(event) {
+  if (sideReleasePointerId == null) return;
+  if (event?.pointerId != null && event.pointerId !== sideReleasePointerId) return;
+  sideReleasePointerId = null;
+  simulation.command('side-release', false);
+  showCabNotice('单缓按钮已松开');
+}
+
 window.addEventListener('pointermove', (event) => {
   if (!activeDrag || event.pointerId !== activeDrag.pointerId) return;
   const change = Math.round((activeDrag.startY - event.clientY) / activeDrag.step);
@@ -257,16 +274,18 @@ window.addEventListener('pointerup', (event) => {
     activeDrag = null;
   }
   stopHorn(event);
+  stopSideRelease(event);
 });
-window.addEventListener('pointercancel', (event) => { activeDrag = null; stopHorn(event); });
-window.addEventListener('blur', () => stopHorn());
-window.addEventListener('pagehide', () => stopHorn());
+window.addEventListener('pointercancel', (event) => { activeDrag = null; stopHorn(event); stopSideRelease(event); });
+window.addEventListener('blur', () => { stopHorn(); stopSideRelease(); });
+window.addEventListener('pagehide', () => { stopHorn(); stopSideRelease(); });
 
 function chooseScenario(id) {
   const scenario = getScenario(id);
   simulation = new SlopeDrivingSimulation(scenario.id);
   assessment = new SlopeDrivingAssessment(simulation);
   lkj.simulation = simulation;
+  cir.setSimulation(simulation);
   lkj.page = 'main';
   lkj.menuIndex = 0;
   routeScene?.resizeObserver?.disconnect();
@@ -283,7 +302,8 @@ function chooseScenario(id) {
   $('#skill-name').textContent = scenario.shortTitle;
   $('#skill-picker').classList.remove('open');
   $('#result-modal').classList.remove('open');
-  $('#lkj-dock').classList.remove('open');
+  lkj.close();
+  cir.close();
   selectedView = 'front';
   selectView('front');
   simulation.start();
@@ -302,6 +322,7 @@ function openBriefing(id) {
     ['天气/黏着', scenario.weather],
   ].map(([key, value]) => `<div><span>${key}</span><b>${value}</b></div>`).join('');
   $('#briefing-physics').innerHTML = `<b>应当观察到的物理现象：</b>${scenario.physicalExpectation}`;
+  $('#notch-reference').innerHTML = `<b>牵引主手柄给定</b><span>本教学模型按 1—7 级对应 ${TRACTION_TARGET_SPEEDS.slice(1).join('、')} km/h 的给定速度。6级为60 km/h；实际能否稳住该速度受坡度、载重、黏着和牵引能力限制，不等于无条件定速。</span>`;
   $('#briefing-scores').innerHTML = scenario.assessmentItems.map((item) => `<li><b>${item.label}<em>${item.points}分</em></b><span>${item.studentGoal}</span></li>`).join('');
   $('#skill-picker').classList.remove('open');
   $('#briefing-modal').classList.add('open');
@@ -323,12 +344,12 @@ function render() {
   frame(elements.independent, s.independentBrake, 4, 3);
   frame(elements.traction, tractionFrame(s.traction), 2, 8);
   frame(elements.direction, s.direction === 'R' ? 0 : s.direction === 'N' ? 1 : 2, 3, 1);
-  elements.autoBadge.querySelector('span').textContent = brakeNames[s.autoBrake];
+  elements.autoBadge.querySelector('span').textContent = BRAKE_POSITIONS[s.autoBrake]?.label || '未知位置';
   elements.independentBadge.querySelector('span').textContent = INDEPENDENT_BRAKE_POSITIONS[s.independentBrake];
-  elements.tractionBadge.querySelector('span').textContent = s.traction > 0 ? `牵引 ${s.traction}级` : s.traction < 0 ? `电制 ${Math.abs(s.traction)}级` : '零位';
+  elements.tractionBadge.querySelector('span').textContent = s.traction > 0 ? `${s.traction}级 / ${s.tractionTargetSpeed} km/h` : s.traction < 0 ? `电制 ${Math.abs(s.traction)}级` : '零位';
   elements.directionBadge.querySelector('span').textContent = s.direction === 'F' ? '前进位' : s.direction === 'R' ? '后退位' : '中立位';
   elements.sideRelease.classList.toggle('active', s.sideRelease);
-  elements.sideRelease.querySelector('span').textContent = s.sideRelease ? '已单缓' : '未动作';
+  elements.sideRelease.querySelector('span').textContent = s.sideRelease ? '按下' : '按住动作';
   elements.horn.classList.toggle('active', s.hornActive);
 
   setNeedle(elements.speedNeedle, s.speed, 158);
@@ -355,6 +376,9 @@ function render() {
   renderProgress(progress);
   renderData(s);
   renderSlopeProfile(s);
+  $('#mobile-auto').textContent = BRAKE_POSITIONS[s.autoBrake]?.label || '—';
+  $('#mobile-independent').textContent = INDEPENDENT_BRAKE_POSITIONS[s.independentBrake] || '—';
+  $('#mobile-traction').textContent = s.traction > 0 ? `${s.traction}级/${s.tractionTargetSpeed}` : s.traction < 0 ? `电制${Math.abs(s.traction)}级` : '零位';
   $('#sand').classList.toggle('active', s.sandRemaining > 0);
   $('#adhesion-state').textContent = s.wheelSlip ? '空转' : s.sandRemaining > 0 ? '撒砂中' : '黏着正常';
   $('#adhesion-state').classList.toggle('danger', s.wheelSlip);
@@ -369,12 +393,17 @@ function render() {
   $('#stage').style.setProperty('--shock-x', `${Math.sin(shakePhase) * shake}px`);
   $('#stage').style.setProperty('--shock-y', `${Math.cos(shakePhase * .73) * shake * .48}px`);
   if (lkj.open) lkj.render();
+  cir.update();
   if (s.lkjLevel !== lastAlertLevel && s.lkjLevel !== 'normal') alertTone(s.lkjLevel);
   lastAlertLevel = s.lkjLevel;
 }
 
 function renderProgress(progress) {
-  $('#progress-list').innerHTML = progress.items.map((item, index) => `<li class="${progress.checks[index] ? 'done' : 'pending'}"><b>${item.label}（${item.points}分）</b><span>${item.studentGoal}</span></li>`).join('');
+  $('#progress-list').innerHTML = progress.items.map((item, index) => {
+    const status = progress.statuses[index];
+    const score = status === 'done' ? `已得${item.points}分` : status === 'active' ? `当前·${item.points}分` : `待解锁·${item.points}分`;
+    return `<li class="${status}"><b><span>${index + 1}. ${item.label}</span><em>${score}</em></b><small>${item.studentGoal}</small></li>`;
+  }).join('');
 }
 
 function renderData(s) {
@@ -385,6 +414,7 @@ function renderData(s) {
     ['首部列车管', `${s.trainPipe.toFixed(0)} kPa`], ['尾部列车管', `${s.tailPipe.toFixed(0)} kPa`],
     ['列车制动缸', `${s.trainBrakeCylinder.toFixed(0)} kPa`], ['机车制动缸', `${s.locomotiveCylinder.toFixed(0)} kPa`],
     ['充风状态', s.rechargeReady ? '充分' : '未充分'], ['目标速度带', `${s.targetBand[0]}—${s.targetBand[1]} km/h`],
+    ['主手柄给定', s.traction > 0 ? `${s.traction}级 / ${s.tractionTargetSpeed} km/h` : s.traction < 0 ? `电制${Math.abs(s.traction)}级` : '零位'], ['估算平衡速度', `${s.balanceSpeed.toFixed(0)} km/h`],
     ['牵引力', `${(s.tractionForce / 1000).toFixed(0)} kN`], ['电制动力', `${(s.dynamicBrakeForce / 1000).toFixed(0)} kN`],
     ['空气制动力', `${(s.airBrakeForce / 1000).toFixed(0)} kN`], ['牵引负荷', `${s.tractionCurrent.toFixed(0)}%`],
     ['速度趋势', `${s.speedTrend >= 0 ? '+' : ''}${s.speedTrend.toFixed(2)} km/h/s`], ['纵向冲动', `${s.shockIndex.toFixed(0)} / 100`],
@@ -445,6 +475,47 @@ function togglePanel(panel) {
   });
 }
 
+function updateViewportVariables() {
+  const viewport = window.visualViewport;
+  document.documentElement.style.setProperty('--visual-height', `${viewport?.height || window.innerHeight}px`);
+  document.documentElement.style.setProperty('--visual-offset-top', `${viewport?.offsetTop || 0}px`);
+}
+
+function updateMobileMode() {
+  const compactLandscape = window.innerHeight <= 620 && window.innerWidth <= 1200;
+  const compactViewport = Math.min(window.innerWidth, window.innerHeight) < 900;
+  const mobile = matchMedia('(pointer: coarse)').matches || Math.min(screen.width, screen.height) < 900 || compactViewport || compactLandscape;
+  document.body.classList.toggle('mobile-controls-enabled', mobile);
+  const portrait = mobile && matchMedia('(orientation: portrait)').matches;
+  $('#landscape-gate').hidden = !portrait;
+}
+
+function setupMobileControls() {
+  document.querySelectorAll('[data-control][data-delta]').forEach((button) => button.addEventListener('click', () => {
+    adjustControl(button.dataset.control, Number(button.dataset.delta));
+  }));
+  const release = $('#mobile-side-release');
+  const startRelease = (event) => {
+    event.preventDefault();
+    sideReleasePointerId = event.pointerId;
+    release.setPointerCapture?.(event.pointerId);
+    simulation.command('side-release', true);
+  };
+  release.addEventListener('pointerdown', startRelease);
+  release.addEventListener('pointerup', stopSideRelease);
+  release.addEventListener('pointercancel', stopSideRelease);
+  $('#enter-training').addEventListener('click', async () => {
+    $('#landscape-gate').hidden = true;
+    try { await $('#stage').requestFullscreen?.(); } catch { /* 移动浏览器可拒绝非必要全屏 */ }
+  });
+  updateViewportVariables();
+  updateMobileMode();
+  window.visualViewport?.addEventListener('resize', updateViewportVariables);
+  window.visualViewport?.addEventListener('scroll', updateViewportVariables);
+  window.addEventListener('resize', () => { updateViewportVariables(); updateMobileMode(); });
+  window.addEventListener('orientationchange', updateMobileMode);
+}
+
 function animationFrame(now) {
   const dt = Math.min(.08, (now - lastFrame) / 1000);
   lastFrame = now;
@@ -457,11 +528,12 @@ function animationFrame(now) {
 }
 
 createCabControls();
+setupMobileControls();
 document.querySelectorAll('[data-scenario]').forEach((button) => button.addEventListener('click', () => openBriefing(button.dataset.scenario)));
 $('#briefing-back').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 $('#briefing-start').addEventListener('click', () => { $('#briefing-modal').classList.remove('open'); chooseScenario(pendingScenarioId); });
 $('#callout').addEventListener('click', () => simulation.command('callout'));
-$('#tail-query').addEventListener('click', () => simulation.command('tail-query'));
+$('#tail-query').addEventListener('click', () => { lkj.close(); cir.show(); });
 $('#sand').addEventListener('click', () => simulation.command('sand'));
 $('#progress-toggle').addEventListener('click', () => togglePanel($('#progress-panel')));
 $('#rules-toggle').addEventListener('click', () => togglePanel($('#rules-panel')));
@@ -473,7 +545,7 @@ $('#fullscreen').addEventListener('click', () => document.fullscreenElement ? do
 $('#retry').addEventListener('click', () => chooseScenario(simulation.state.scenarioId));
 $('#choose-skill').addEventListener('click', () => { $('#result-modal').classList.remove('open'); $('#skill-picker').classList.add('open'); });
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu').classList.remove('open'); lkj.close(); }
+  if (event.key === 'Escape') { document.querySelectorAll('.side-panel').forEach((panel) => panel.classList.remove('open')); $('#view-menu').classList.remove('open'); lkj.close(); cir.close(); }
   if (event.key.toLowerCase() === 's') simulation.command('sand');
 });
 

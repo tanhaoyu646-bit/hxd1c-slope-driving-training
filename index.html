@@ -17,7 +17,7 @@
 
       <header class="toolbar">
         <button type="button" id="callout" class="toolbar-button callout">呼唤确认</button>
-        <button type="button" id="tail-query" class="toolbar-button">列尾查询</button>
+        <button type="button" id="tail-query" class="toolbar-button">CIR</button>
         <button type="button" id="sand" class="toolbar-button action-button">撒砂</button>
         <button type="button" id="progress-toggle" class="toolbar-button">考评进度 <b id="progress-count">0/7</b></button>
         <button type="button" id="rules-toggle" class="toolbar-button">考评说明</button>
@@ -63,12 +63,29 @@
         <b id="skill-name">坡道驾驶</b><span id="phase-name">准备开始</span><em id="status-message">仅考评模式</em>
       </div>
 
+      <nav id="mobile-controls" class="mobile-controls" aria-label="手机驾驶操纵">
+        <div><span>自阀</span><button type="button" data-control="auto" data-delta="-1">−</button><b id="mobile-auto">运转位</b><button type="button" data-control="auto" data-delta="1">＋</button></div>
+        <div><span>单阀</span><button type="button" data-control="independent" data-delta="-1">−</button><b id="mobile-independent">运转位</b><button type="button" data-control="independent" data-delta="1">＋</button></div>
+        <div><span>主手柄</span><button type="button" data-control="traction" data-delta="-1">−</button><b id="mobile-traction">零位</b><button type="button" data-control="traction" data-delta="1">＋</button></div>
+        <button type="button" id="mobile-side-release" class="mobile-side-release">按住单缓</button>
+      </nav>
+
       <section id="lkj-dock" class="lkj-dock" aria-hidden="true">
         <button type="button" class="lkj-close" data-lkj-close aria-label="关闭LKJ放大界面">×</button>
         <div class="lkj-device">
-          <img src="./assets/lkj/native-states/main-blank.png" alt="LKJ2000监控装置">
+          <img data-lkj-face src="./assets/lkj/native-states/main-blank.png" alt="LKJ2000监控装置">
           <div class="lkj-screen"></div>
           <div class="lkj-keypad"></div>
+        </div>
+      </section>
+
+      <section id="cir-dock" class="cir-dock" aria-hidden="true">
+        <div class="cir-shell" role="dialog" aria-modal="true" aria-label="CIR机车综合无线通信设备">
+          <header><div><strong>CIR 机车综合无线通信设备</strong><span>列尾装置连接与风压查询</span></div><button type="button" data-cir-close aria-label="关闭CIR">×</button></header>
+          <div class="cir-layout">
+            <div class="cir-frame-wrap"><div class="cir-loading">正在载入CIR原功能模拟器…</div><iframe class="cir-frame" title="CIR模拟器" src="about:blank" sandbox="allow-scripts allow-same-origin allow-modals"></iframe></div>
+            <aside class="cir-workflow" aria-live="polite"></aside>
+          </div>
         </div>
       </section>
 
@@ -91,6 +108,7 @@
           <h2 id="briefing-title">考评任务</h2>
           <div id="briefing-meta" class="briefing-meta"></div>
           <p id="briefing-physics" class="briefing-physics"></p>
+          <div id="notch-reference" class="notch-reference"></div>
           <h3>本次只看 7 项评分</h3>
           <ol id="briefing-scores" class="briefing-scores"></ol>
           <p class="briefing-note">目标不是逐字照抄固定步骤，而是在规定时机、速度带和设备逻辑内完成操纵。安全红线会把总分封顶为 59 分。</p>
@@ -110,6 +128,9 @@
       </section>
     </section>
   </main>
+  <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog">
+    <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
+  </section>
   <script type="module" src="./scripts/slopeDrivingApp.js"></script>
 </body>
 </html>
