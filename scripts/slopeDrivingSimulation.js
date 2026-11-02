@@ -38,7 +38,9 @@ export class SlopeDrivingSimulation extends EventTarget {
       shockIndex: 0,
       maxShockIndex: 0,
       shockStickTilt: 0,
+      shockStickFallen: 0,
       controlShock: 0,
+      notchSkipCount: 0,
       couplerForce: 0,
       traction: scenario.initialTraction,
       tractionTargetSpeed: tractionTargetSpeed(scenario.initialTraction),
@@ -78,6 +80,14 @@ export class SlopeDrivingSimulation extends EventTarget {
       lastCalloutAt: -999,
       wheelSlip: false,
       slipDuration: 0,
+      slipEncountered: false,
+      slipReducedAt: null,
+      slipReductionValid: false,
+      slipSandedAt: null,
+      slipSandAfterReduction: false,
+      slipEndedAt: null,
+      slipRecoveryValid: false,
+      slipRecoveryError: false,
       tractionForce: 0,
       dynamicBrakeForce: 0,
       airBrakeForce: 0,
@@ -87,6 +97,10 @@ export class SlopeDrivingSimulation extends EventTarget {
       tractionThermal: 0,
       brakeHeat: 0,
       rechargeReady: true,
+      airNeedTimer: 0,
+      airRequiredAt: null,
+      airControlState: 'idle',
+      combinedBrakeErrors: 0,
       suppressionHeld: 0,
       completed: false,
       qualified: null,
@@ -99,6 +113,7 @@ export class SlopeDrivingSimulation extends EventTarget {
     this.previousRecharge = true;
     this.lowSpeedTime = 0;
     this.previousAcceleration = 0;
+    this.rapidTraction = { start: scenario.initialTraction, direction: 0, lastAt: -999, counted: 0 };
     this.adhesionSeed = Math.random() * Math.PI * 2;
     this.dispatchEvent(new CustomEvent('reset', { detail: this.state }));
     return this.state;
@@ -123,16 +138,73 @@ export class SlopeDrivingSimulation extends EventTarget {
       sideRelease: s.sideRelease,
     };
     if (type === 'traction') {
-      s.traction = clamp(Math.round(Number(value) || 0), -DYNAMIC_BRAKE_MAX, TRACTION_MAX);
+      const requested = clamp(Math.round(Number(value) || 0), -DYNAMIC_BRAKE_MAX, TRACTION_MAX);
+      if (requested === s.traction) return false;
+      const previousTraction = s.traction;
+      const delta = requested - previousTraction;
+      const step = Math.abs(delta);
+      const direction = Math.sign(delta);
+      let skipped = Math.max(0, step - 1);
+      let skipKind = step > 1 ? 'direct' : '';
+      if (step === 1) {
+        const rapid = direction === this.rapidTraction.direction && s.elapsed - this.rapidTraction.lastAt <= 1.2;
+        if (!rapid) {
+          this.rapidTraction.start = previousTraction;
+          this.rapidTraction.counted = 0;
+        }
+        const rapidSpan = Math.abs(requested - this.rapidTraction.start);
+        const rapidSkipped = Math.max(0, rapidSpan - 1);
+        skipped = Math.max(0, rapidSkipped - this.rapidTraction.counted);
+        if (skipped > 0) skipKind = 'rapid';
+        this.rapidTraction.counted = rapidSkipped;
+      } else {
+        this.rapidTraction.start = requested;
+        this.rapidTraction.counted = 0;
+      }
+      this.rapidTraction.direction = direction;
+      this.rapidTraction.lastAt = s.elapsed;
+      s.traction = requested;
       s.tractionTargetSpeed = tractionTargetSpeed(s.traction);
+      if (skipped > 0) {
+        s.notchSkipCount += skipped;
+        s.shockStickFallen = clamp(s.shockStickFallen + skipped, 0, 6);
+        s.shockStickTilt = Math.max(s.shockStickTilt, s.shockStickFallen * 15);
+        s.controlShock = clamp(s.controlShock + 34 + skipped * 8, 0, 100);
+        this.log('traction-skip', { value: requested, from: previousTraction, skipped, kind: skipKind });
+      }
+      if (s.slipEncountered && s.slipReducedAt == null && requested < previousTraction) {
+        const reduction = previousTraction - requested;
+        s.slipReducedAt = s.elapsed;
+        s.slipReductionValid = reduction >= 1 && reduction <= 2;
+        this.log('slip-traction-reduced', { reduction, valid: s.slipReductionValid });
+      } else if (s.slipEndedAt != null && requested > previousTraction && !s.slipRecoveryValid) {
+        const delay = s.elapsed - s.slipEndedAt;
+        const valid = step === 1 && delay >= 2;
+        s.slipRecoveryValid = valid;
+        s.slipRecoveryError = !valid;
+        this.log('slip-traction-recovery', { delay, valid });
+      }
+      if (s.autoBrake > 0 && previousTraction < 0 && requested > previousTraction) {
+        const reason = requested === 0 ? '空气制动作用中动力制动提前回零' : step > 1 ? '空气制动作用中动力制动跨级回退' : '';
+        if (reason) {
+          s.combinedBrakeErrors += 1;
+          this.log('combined-brake-error', { reason, from: previousTraction, to: requested });
+        }
+      }
     } else if (type === 'auto-brake') {
       const requested = clamp(Math.round(Number(value) || 0), 0, BRAKE_POSITIONS.length - 1);
+      if (requested === s.autoBrake) return false;
       if (requested === 10 && (s.speed > 1 || s.direction !== 'N')) {
         this.log('auto-brake-rejected', { requested, reason: '操纵端运行中不得置重联位' });
         return false;
       }
       s.autoBrake = requested;
       if (requested === 11) this.log('manual-emergency-brake');
+      if (previous.autoBrake === 0 && requested > 0 && s.airRequiredAt != null) {
+        const delay = s.elapsed - s.airRequiredAt;
+        s.airControlState = delay <= 6 && s.speed < 68 ? 'commanded-timely' : 'commanded-late';
+        this.log(delay <= 6 && s.speed < 68 ? 'air-brake-timely' : 'air-brake-late', { delay, requiredAt: s.airRequiredAt });
+      }
     } else if (type === 'independent-brake') {
       s.independentBrake = clamp(Math.round(Number(value) || 0), 0, INDEPENDENT_BRAKE_MAX);
     }
@@ -148,8 +220,14 @@ export class SlopeDrivingSimulation extends EventTarget {
       const useful = s.traction > 0 && (s.wheelSlip || s.adhesionCoefficient < .285);
       if (!useful) s.unnecessarySandingCount += 1;
       this.log('sand', { useful });
+      if (s.slipEncountered && s.slipSandedAt == null) {
+        s.slipSandedAt = s.elapsed;
+        s.slipSandAfterReduction = s.slipReducedAt != null && s.elapsed - s.slipReducedAt <= 4;
+        this.log('slip-sand-sequence', { valid: useful && s.slipSandAfterReduction });
+      }
     } else if (type === 'shock-reset') {
       s.shockStickTilt = 0;
+      s.shockStickFallen = 0;
       this.log('shock-stick-reset', { retainedMaximum: s.maxShockIndex });
     } else if (type === 'cir-open') {
       s.cirOpenCount += 1;
@@ -309,7 +387,12 @@ export class SlopeDrivingSimulation extends EventTarget {
     const thermalDerate = clamp(1 - Math.max(0, s.tractionThermal - 18) / 70, .66, 1);
     // 正常黏着条件下由机车防空转控制自动限流；本课题只在明确的低黏着区
     // 暴露空转现象，让学生进行降级或短时撒砂处置。
-    s.wheelSlip = s.adhesionCoefficient < .28 && requestedTraction > adhesion * 1.01 && s.traction > 0;
+    const slipSequenceResolved = s.slipReductionValid && s.slipSandAfterReduction;
+    const trainingSlip = this.scenario.id === 'uphill'
+      && s.distance >= 3_300 && s.distance <= 3_900
+      && s.traction > 0 && s.slipReducedAt == null;
+    s.wheelSlip = !slipSequenceResolved
+      && (trainingSlip || (s.adhesionCoefficient < .28 && requestedTraction > adhesion * 1.01 && s.traction > 0));
     const adhesionForce = s.wheelSlip ? adhesion * .92 : adhesion;
     s.tractionForce = s.autoBrake === 0 && s.lkjForcedBrake === 0
       ? Math.min(requestedTraction, adhesionForce) * thermalDerate
@@ -320,8 +403,14 @@ export class SlopeDrivingSimulation extends EventTarget {
     else s.tractionThermal = Math.max(0, s.tractionThermal - dt * .08);
 
     if (s.wheelSlip) s.slipDuration += dt;
-    if (s.wheelSlip && !this.previousSlip) this.log('wheel-slip-start');
-    if (!s.wheelSlip && this.previousSlip) this.log('wheel-slip-end');
+    if (s.wheelSlip && !this.previousSlip) {
+      s.slipEncountered = true;
+      this.log('wheel-slip-start');
+    }
+    if (!s.wheelSlip && this.previousSlip) {
+      s.slipEndedAt = s.elapsed;
+      this.log('wheel-slip-end');
+    }
     this.previousSlip = s.wheelSlip;
 
     const dynamicFraction = Math.abs(Math.min(0, s.traction)) / 8;
@@ -347,6 +436,24 @@ export class SlopeDrivingSimulation extends EventTarget {
     this.previousAcceleration = newAcceleration;
     s.speed = Math.max(0, s.speed + s.acceleration * dt * 3.6);
     s.distance += s.speed / 3.6 * dt;
+
+    if (this.scenario.id === 'downhill' && s.distance >= 2_200 && s.distance < 8_200
+      && s.speed >= 64 && s.speedTrend > .04 && s.traction <= -6) {
+      s.airNeedTimer += dt;
+      if (s.airNeedTimer >= 2 && s.airRequiredAt == null) {
+        s.airRequiredAt = s.elapsed;
+        s.airControlState = 'required';
+        this.log('air-brake-required', { speed: s.speed, trend: s.speedTrend });
+      }
+    } else s.airNeedTimer = Math.max(0, s.airNeedTimer - dt * 2);
+    if (s.airRequiredAt != null && s.autoBrake === 0 && s.elapsed - s.airRequiredAt > 6 && s.airControlState === 'required') {
+      s.airControlState = 'missed';
+      this.log('air-brake-missed', { delay: s.elapsed - s.airRequiredAt });
+    }
+    if (s.autoBrake > 0 && s.airControlState.startsWith('commanded') && s.trainPipe <= nominalPipe - 45) {
+      s.airControlState = s.airControlState === 'commanded-timely' ? 'effective-timely' : 'effective-late';
+      this.log('air-brake-effective', { trainPipe: s.trainPipe, tailPipe: s.tailPipe });
+    }
 
     this.updateLkjProtection();
     if (s.elapsed - this.lastSampleAt >= .5) {

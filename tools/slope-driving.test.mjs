@@ -34,18 +34,29 @@ function runUphill() {
   simulation.command('tail-link', '100001');
   simulation.command('tail-query');
   simulation.command('callout');
-  let lastCommand = simulation.state.traction;
+  let lastMoveAt = -99;
+  let slipHandled = false;
   return runUntilComplete(simulation, (sim) => {
     const s = sim.state;
-    const target = s.elapsed < 2 ? 2
-      : s.elapsed < 4 ? 4
-        : s.elapsed < 6 ? 6
-          : s.distance < 2400 ? 7
-            : s.distance < 7600 ? 6
-              : s.distance < 8000 ? 4
-                : s.distance < 8400 ? 2 : 0;
-    if (target !== lastCommand) { sim.command('traction', target); lastCommand = target; }
-    if (s.wheelSlip && s.sandRemaining < 1) sim.command('sand');
+    let target = s.distance < 2400 ? 7
+      : s.distance < 7600 ? 6
+        : s.distance < 8000 ? 4
+          : s.distance < 8400 ? 2 : 0;
+    if (s.wheelSlip && !slipHandled) {
+      sim.command('traction', s.traction - 1);
+      sim.command('sand');
+      slipHandled = true;
+      lastMoveAt = s.elapsed;
+    } else if (slipHandled && s.slipEndedAt != null && !s.slipRecoveryValid) {
+      target = 6;
+      if (s.elapsed - s.slipEndedAt >= 2 && s.traction < target && s.elapsed - lastMoveAt >= 1.3) {
+        sim.command('traction', s.traction + 1);
+        lastMoveAt = s.elapsed;
+      }
+    } else if (s.traction !== target && s.elapsed - lastMoveAt >= 1.3) {
+      sim.command('traction', s.traction + Math.sign(target - s.traction));
+      lastMoveAt = s.elapsed;
+    }
   });
 }
 
@@ -55,21 +66,39 @@ function runDownhill() {
   simulation.command('tail-link', '100001');
   simulation.command('tail-query');
   simulation.command('callout');
-  let targetTraction = 0;
   let brakePhase = 0;
+  let lastTractionAt = -99;
+  let lastBrakeAt = -99;
   return runUntilComplete(simulation, (sim) => {
     const s = sim.state;
-    const nextTraction = s.distance < 400 ? 0
+    const targetTraction = s.distance < 400 ? 0
       : s.distance < 800 ? -1
         : s.distance < 1200 ? -2
-          : s.distance < 1600 ? -4
-            : s.distance < 2000 ? -6
-              : s.distance < 8200 ? -8
-                : s.distance < 9400 ? -6 : -4;
-    if (nextTraction !== targetTraction) { sim.command('traction', nextTraction); targetTraction = nextTraction; }
-    if (brakePhase === 0 && s.distance > 2600 && s.traction <= -8 && s.speed >= 58 && s.speedTrend > .04) { sim.command('auto-brake', 1); brakePhase = 1; }
-    else if (brakePhase === 1 && s.distance > 7000 && s.speed > 56) { sim.command('auto-brake', 2); brakePhase = 2; }
-    else if (brakePhase === 2 && s.speed <= 54.5) { sim.command('auto-brake', 0); brakePhase = 3; }
+          : s.distance < 1450 ? -3
+            : s.distance < 1700 ? -4
+              : s.distance < 1950 ? -5
+                : s.distance < 2200 ? -6
+                  : s.distance < 2450 ? -7
+                    : s.distance < 9400 ? -8
+                      : s.distance < 9700 ? -5
+                        : s.distance < 9900 ? -3 : 0;
+    if (s.traction !== targetTraction && s.elapsed - lastTractionAt >= 1.3) {
+      sim.command('traction', s.traction + Math.sign(targetTraction - s.traction));
+      lastTractionAt = s.elapsed;
+    }
+    if (brakePhase === 0 && s.airRequiredAt != null) {
+      sim.command('auto-brake', 1);
+      brakePhase = 1;
+      lastBrakeAt = s.elapsed;
+    } else if (brakePhase === 1 && s.airControlState.startsWith('effective') && s.speedTrend > -.02 && s.elapsed - lastBrakeAt > 8) {
+      sim.command('auto-brake', 2);
+      brakePhase = 2;
+      lastBrakeAt = s.elapsed;
+    } else if (brakePhase === 2 && s.speed <= 55 && s.speedTrend < 0 && s.elapsed - lastBrakeAt > 8) {
+      sim.command('auto-brake', 0);
+      brakePhase = 3;
+      lastBrakeAt = s.elapsed;
+    }
   });
 }
 
@@ -214,6 +243,104 @@ test('大跨级操纵产生的纵向冲动高于逐级操纵', () => {
     for (let index = 0; index < 35; index += 1) gradual.tick(.05);
   }
   assert.ok(abrupt.state.maxShockIndex > gradual.state.maxShockIndex, `${abrupt.state.maxShockIndex} <= ${gradual.state.maxShockIndex}`);
+});
+
+test('跨2级至少倒一根冲动棒，快速连续相邻级位不能规避越级记录', () => {
+  const direct = new SlopeDrivingSimulation('uphill');
+  direct.command('traction', 2);
+  assert.equal(direct.state.notchSkipCount, 1);
+  assert.equal(direct.state.shockStickFallen, 1);
+  assert.ok(direct.state.events.some((event) => event.type === 'traction-skip' && event.kind === 'direct'));
+
+  const rapid = new SlopeDrivingSimulation('uphill');
+  rapid.command('traction', 1);
+  for (let index = 0; index < 8; index += 1) rapid.tick(.05);
+  rapid.command('traction', 2);
+  assert.equal(rapid.state.notchSkipCount, 1);
+  assert.equal(rapid.state.shockStickFallen, 1);
+  assert.ok(rapid.state.events.some((event) => event.type === 'traction-skip' && event.kind === 'rapid'));
+
+  const steady = new SlopeDrivingSimulation('uphill');
+  steady.command('traction', 1);
+  for (let index = 0; index < 28; index += 1) steady.tick(.05);
+  steady.command('traction', 2);
+  assert.equal(steady.state.notchSkipCount, 0);
+  assert.equal(steady.state.shockStickFallen, 0);
+});
+
+test('同一级位重复拖动不重复记录操作次数', () => {
+  const simulation = new SlopeDrivingSimulation('uphill');
+  assert.equal(simulation.command('traction', 1), true);
+  assert.equal(simulation.command('traction', 1), false);
+  assert.equal(simulation.command('traction', 1), false);
+  assert.equal(simulation.state.events.filter((event) => event.type === 'traction').length, 1);
+});
+
+test('上坡空转要求先降1至2级再短时撒砂并延迟恢复加载', () => {
+  const correct = new SlopeDrivingSimulation('uphill');
+  correct.start();
+  correct.state.distance = 3_350;
+  correct.command('traction', 6);
+  correct.tick(.05);
+  assert.equal(correct.state.wheelSlip, true);
+  correct.command('traction', 5);
+  correct.command('sand');
+  correct.tick(.05);
+  assert.equal(correct.state.slipReductionValid, true);
+  assert.equal(correct.state.slipSandAfterReduction, true);
+  assert.equal(correct.state.wheelSlip, false);
+  for (let index = 0; index < 45; index += 1) correct.tick(.05);
+  correct.command('traction', 6);
+  assert.equal(correct.state.slipRecoveryValid, true);
+
+  const wrong = new SlopeDrivingSimulation('uphill');
+  wrong.start();
+  wrong.state.distance = 3_350;
+  wrong.command('traction', 6);
+  wrong.tick(.05);
+  wrong.command('sand');
+  wrong.command('traction', 5);
+  assert.equal(wrong.state.slipSandAfterReduction, false);
+});
+
+test('下坡电制8级单独运行会超过68，64持续增速时及时空气制动可控制速度', () => {
+  const noAir = new SlopeDrivingSimulation('downhill');
+  noAir.start();
+  let lastMoveAt = -99;
+  for (let index = 0; index < 20_000 && noAir.state.distance < 8_000; index += 1) {
+    const s = noAir.state;
+    const target = s.distance < 400 ? 0
+      : s.distance < 800 ? -1
+        : s.distance < 1200 ? -2
+          : s.distance < 1450 ? -3
+            : s.distance < 1700 ? -4
+              : s.distance < 1950 ? -5
+                : s.distance < 2200 ? -6
+                  : s.distance < 2450 ? -7 : -8;
+    if (s.traction !== target && s.elapsed - lastMoveAt >= 1.3) {
+      noAir.command('traction', s.traction + Math.sign(target - s.traction));
+      lastMoveAt = s.elapsed;
+    }
+    noAir.tick(.05);
+  }
+  assert.ok(Math.max(...noAir.state.samples.map((sample) => sample.speed)) > 68);
+  assert.ok(noAir.state.events.some((event) => event.type === 'air-brake-missed'));
+
+  const controlled = runDownhill();
+  const coreMaximum = Math.max(...controlled.state.samples.filter((sample) => sample.distance < 8_200).map((sample) => sample.speed));
+  assert.ok(controlled.state.events.some((event) => event.type === 'air-brake-timely'));
+  assert.ok(controlled.state.events.some((event) => event.type === 'air-brake-effective'));
+  assert.ok(coreMaximum <= 68, coreMaximum);
+});
+
+test('电空联合制动中动力制动直接回零记录错误并产生明显倒棒', () => {
+  const simulation = new SlopeDrivingSimulation('downhill');
+  simulation.command('traction', -8);
+  simulation.command('auto-brake', 1);
+  simulation.command('traction', 0);
+  assert.equal(simulation.state.combinedBrakeErrors, 1);
+  assert.equal(simulation.state.shockStickFallen, 6);
+  assert.ok(simulation.state.events.some((event) => event.type === 'combined-brake-error'));
 });
 
 test('忽略坡道限速会触发LKJ安全红线', () => {

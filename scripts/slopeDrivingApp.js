@@ -443,7 +443,10 @@ function operationHint(state) {
   if (simulation.scenario.id === 'uphill') {
     if (state.distance < 1500) return '坡前确认LKJ与列尾，在限速70内保持63—70 km/h';
     if (state.distance < 2500) return state.speedTrend < -.12 ? '进入+6‰：速度下降，按需逐级增加牵引' : '进入+6‰：趋势稳定，可保持当前牵引';
-    if (state.distance < 7600) return state.wheelSlip ? '发生空转：先降低牵引，必要时短时撒砂' : '长坡：按速度趋势管理牵引，不需要频繁移动手柄';
+    if (state.wheelSlip && state.slipReducedAt == null) return '发生空转：先降低1～2级牵引';
+    if (state.slipReducedAt != null && state.slipSandedAt == null) return '已降低牵引：现在短时撒砂';
+    if (state.slipEndedAt != null && !state.slipRecoveryValid && state.distance < 4300) return '黏着恢复：保持2秒后再逐级加载';
+    if (state.distance < 7600) return '长坡：按速度趋势管理牵引，不需要频繁移动手柄';
     if (state.distance < 8600) return '接近坡顶：根据坡度减小和速度回升逐级退牵引';
     return '越过坡顶：防止速度回升超过线路限速';
   }
@@ -452,7 +455,11 @@ function operationHint(state) {
   if (state.distance < 2200) return state.speedTrend > .08 ? '-7‰过渡坡：速度仍升，逐级增加动力制动' : '-7‰过渡坡：趋势稳定，保持当前动力制动';
   if (state.autoBrake > 0) return state.speed <= 56 ? '速度已回落：保持动力制动，先将自阀回运转位充风' : '空气制动作用中：保持动力制动，等待全列制动建立';
   if (!state.rechargeReady) return '空气制动已缓解：保持动力制动，观察首尾列车管充风';
-  if (state.distance < 7000) return state.speed >= 58 && state.speedTrend > .04 ? '接近上沿且仍增速：增加动力制动；高位仍不足再用初制动' : '长坡：48—60 km/h内按趋势保持或逐级调整动力制动';
+  if (state.distance < 7000) {
+    if (state.airControlState === 'required' || state.airControlState === 'missed') return '64 km/h仍增速：保持动力制动，立即将自阀置初制动位';
+    if (state.airControlState.startsWith('commanded')) return '空气制动正在建立：保持动力制动，观察速度与列车管';
+    return '长坡：52—64 km/h为推荐区，达到64且仍增速时补充空气制动';
+  }
   if (state.distance < 8200) return '接近55 km/h限速点：根据LKJ控制曲线提前完成减速';
   return '限速区：保持55 km/h及以下，避免频繁制动和缓解';
 }
@@ -505,7 +512,7 @@ function render() {
   const shockLabel = s.shockIndex >= 72 ? '明显' : s.shockIndex >= 42 ? '可感' : '低';
   $('#shock-state').textContent = `${shockLabel} ${s.shockIndex.toFixed(0)}`;
   $('#shock-state').className = s.shockIndex >= 72 ? 'danger' : s.shockIndex >= 42 ? 'warning' : '';
-  $('#shock-stick').dataset.level = String(Math.min(6, Math.ceil(s.shockStickTilt / 15)));
+  $('#shock-stick').dataset.level = String(Math.min(6, Math.max(s.shockStickFallen, Math.ceil(s.shockStickTilt / 15))));
   $('#shock-stick').classList.toggle('fallen', s.shockStickTilt >= 70);
   const shake = Math.min(3.2, Math.max(0, s.shockIndex - 34) / 18);
   const shakePhase = s.elapsed * 34;
@@ -537,6 +544,7 @@ function renderData(s) {
     ['牵引力', `${(s.tractionForce / 1000).toFixed(0)} kN`], ['电制动力', `${(s.dynamicBrakeForce / 1000).toFixed(0)} kN`],
     ['空气制动力', `${(s.airBrakeForce / 1000).toFixed(0)} kN`], ['牵引负荷', `${s.tractionCurrent.toFixed(0)}%`],
     ['速度趋势', `${s.speedTrend >= 0 ? '+' : ''}${s.speedTrend.toFixed(2)} km/h/s`], ['纵向冲动', `${s.shockIndex.toFixed(0)} / 100`],
+    ['越级记录', `${s.notchSkipCount} 级`], ['空气制动需求', s.airControlState],
   ];
   $('#run-data').innerHTML = rows.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('');
 }
