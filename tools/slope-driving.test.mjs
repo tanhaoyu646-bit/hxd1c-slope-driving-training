@@ -215,6 +215,15 @@ test('下坡满分轨迹包含动力制动、空气补充、先缓解空气和�
   assert.equal(result.score, 100, JSON.stringify(result.categories));
 });
 
+test('下坡考评不再使用热负荷作为扣分点', () => {
+  const simulation = runDownhill();
+  simulation.state.brakeHeat = 100;
+  const result = new SlopeDrivingAssessment(simulation).result();
+  const smoothness = result.categories.find((item) => item.name === '纵向平稳与制动操作');
+  assert.equal(smoothness.score, 10, JSON.stringify(smoothness));
+  assert.doesNotMatch(JSON.stringify(result.categories), /热负荷|闸瓦/);
+});
+
 test('空电联锁区分列车制动缸与机车制动缸，单阀达到90 kPa后切除动力制动', () => {
   const simulation = new SlopeDrivingSimulation('downhill');
   simulation.command('traction', -4);

@@ -234,9 +234,8 @@ export class SlopeDrivingAssessment {
     let smoothness = 10;
     if (state.maxShockIndex > 72) smoothness -= 4;
     if (state.notchSkipCount > 0) smoothness -= Math.min(4, state.notchSkipCount);
-    if (state.brakeHeat > 80) smoothness -= 3;
     if (autoMoves.length > 10) smoothness -= 3;
-    categories.push(category('纵向与热负荷', smoothness, 10, '冲动、闸瓦热负荷和制动次数受控'));
+    categories.push(category('纵向平稳与制动操作', smoothness, 10, '避免冲动、越级和频繁调整空气制动'));
 
     return this.finalize(state, categories);
   }

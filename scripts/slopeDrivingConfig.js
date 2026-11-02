@@ -72,7 +72,7 @@ const downhillAssessmentItems = Object.freeze([
   { id: 'air', label: '空气制动补充与保持', points: 15, studentGoal: '电制6～8级且64 km/h仍增速时，保持动力制动并及时实施不小于50 kPa减压。' },
   { id: 'recharge', label: '缓解充风与空电联锁', points: 15, studentGoal: '速度回落且动力制动能控速时，先缓解空气制动，保持动力制动并确认首尾充风。' },
   { id: 'restriction', label: '限速点前完成减速', points: 15, studentGoal: '进入8.2 km限速点以前将速度降至55 km/h及以下。' },
-  { id: 'smooth', label: '平稳操纵与安全结果', points: 10, studentGoal: '控制纵向冲动和制动热负荷，全程不触发安全红线。' },
+  { id: 'smooth', label: '平稳操纵与安全结果', points: 10, studentGoal: '避免冲动、越级和频繁调整空气制动，全程不触发安全红线。' },
 ]);
 
 export const SCENARIOS = Object.freeze({
