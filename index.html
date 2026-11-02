@@ -112,13 +112,19 @@
         <div class="result-card result-shell" role="dialog" aria-modal="true" aria-label="考评成绩单">
           <header class="result-head"><div><strong id="result-title">坡道驾驶与调速考评成绩单</strong><span>课堂训练结果，不作为实际作业记录</span></div><button type="button" id="result-close" aria-label="关闭成绩单">×</button></header>
           <div class="result-body">
-            <div class="result-candidate">
-              <span>姓名<b id="result-name">—</b></span><span>学号<b id="result-student-id">—</b></span>
-              <span>开始时间<b id="result-started-at">—</b></span><span>结束时间<b id="result-finished-at">—</b></span>
+            <div class="result-overview">
+              <div class="result-candidate">
+                <span>姓名<b id="result-name">—</b></span><span>学号<b id="result-student-id">—</b></span>
+                <span>开始<b id="result-started-at">—</b></span><span>结束<b id="result-finished-at">—</b></span>
+              </div>
+              <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
+              <p id="result-summary"></p>
+              <div id="result-tally" class="result-tally">共7个考评项点</div>
             </div>
-            <div class="result-score"><b id="result-score">0</b><span>分</span><em id="result-grade">—</em></div>
-            <p id="result-summary"></p>
-            <div id="result-categories" class="result-categories"></div>
+            <section class="result-breakdown" aria-label="考评项点得分情况">
+              <header><strong>7项考评完成情况</strong><span>实得分 / 满分</span></header>
+              <div id="result-categories" class="result-categories"></div>
+            </section>
             <div class="result-actions"><button type="button" id="retry">重新考评</button><button type="button" id="choose-skill">选择其他项目</button><button type="button" id="change-candidate" class="change-candidate">更换学员</button></div>
           </div>
         </div>
@@ -128,6 +134,6 @@
   <section id="landscape-gate" class="landscape-gate" hidden aria-modal="true" role="dialog" inert>
     <div><h2>请横屏操作</h2><p>横屏后可同时观察线路、LKJ和三类手柄。</p><button id="enter-training" type="button">进入考评</button></div>
   </section>
-  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2-3"></script>
+  <script type="module" src="./scripts/slopeDrivingApp.js?rev=slope-v2-3-1"></script>
 </body>
 </html>

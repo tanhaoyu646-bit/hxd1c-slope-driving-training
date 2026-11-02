@@ -580,7 +580,16 @@ function showResult() {
   $('#result-started-at').textContent = formatAttemptTime(identity.startedAt);
   $('#result-finished-at').textContent = formatAttemptTime(new Date());
   $('#result-summary').textContent = `全程 ${(result.distance / 1000).toFixed(2)} km，最高速度 ${result.maximumSpeed.toFixed(1)} km/h，用时 ${result.duration.toFixed(0)} s。${result.redline ? '本次触发安全红线。' : ''}`;
-  $('#result-categories').innerHTML = result.categories.map((category) => `<div><span>${category.name}<small>${category.evidence || ''}</small></span><b>${category.score}/${category.maximum}</b></div>`).join('');
+  const fullCount = result.categories.filter((category) => category.score >= category.maximum).length;
+  const zeroCount = result.categories.filter((category) => category.score === 0).length;
+  const deductedCount = result.categories.length - fullCount;
+  const deductedPoints = result.categories.reduce((sum, category) => sum + category.maximum - category.score, 0);
+  $('#result-tally').textContent = `共${result.categories.length}项：满分${fullCount}项，扣分${deductedCount}项，未得分${zeroCount}项，共扣${deductedPoints}分`;
+  $('#result-categories').innerHTML = result.categories.map((category, index) => {
+    const status = category.score >= category.maximum ? 'full' : category.score === 0 ? 'zero' : 'partial';
+    const statusText = status === 'full' ? '完成' : status === 'zero' ? '未得分' : `扣${category.maximum - category.score}分`;
+    return `<div class="result-category ${status}"><i>${String(index + 1).padStart(2, '0')}</i><span><strong>${category.name}</strong><small>${category.evidence || '无详细记录'}</small></span><em>${statusText}</em><b>${category.score}/${category.maximum}</b></div>`;
+  }).join('');
   $('#result-modal').classList.add('open');
   $('#result-modal').setAttribute('aria-hidden', 'false');
 }

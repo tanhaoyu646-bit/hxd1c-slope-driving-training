@@ -426,10 +426,18 @@ test('考评抽屉支持点击框外收起，手机端保留三类手柄位置�
   assert.doesNotMatch(css, /body\.mobile-controls-enabled \.control-position-badge\{display:none/);
 });
 
-test('成绩单沿用过分相项目的标题栏、主体和关闭结构', () => {
+test('成绩单沿用过分相结构并在手机横屏完整展示七项得分', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../scripts/slopeDrivingApp.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../styles/slope-driving.css', import.meta.url), 'utf8');
   assert.match(html, /class="result-card result-shell"/);
   assert.match(html, /class="result-head"/);
   assert.match(html, /class="result-body"/);
   assert.match(html, /id="result-close"/);
+  assert.match(html, /id="result-student-id"/);
+  assert.match(html, /7项考评完成情况/);
+  assert.match(app, /满分\$\{fullCount\}项，扣分\$\{deductedCount\}项/);
+  assert.match(app, /result-category \$\{status\}/);
+  assert.match(css, /grid-template-rows:repeat\(7,minmax\(0,1fr\)\)/);
+  assert.match(css, /orientation:landscape\) and \(max-height:620px\)/);
 });
